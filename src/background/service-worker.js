@@ -439,7 +439,7 @@ async function executeTool(toolName, toolInput, sessionTabGroupId = null, mcpSes
 
   // Auto-resolve tabId: if the agent didn't provide one, use the active tab in the session's window
   // tabs_close is excluded — it always requires an explicit tabId
-  const tabTools = ['computer', 'read_page', 'find', 'form_input', 'get_page_text',
+  const tabTools = ['computer', 'read_page', 'find', 'form_input', 'get_page_text', 'collect_page_text',
                     'javascript_tool', 'file_upload', 'read_console_messages', 'read_network_requests',
                     'resize_window', 'solve_captcha', 'navigate'];
   if (!toolInput.tabId && tabTools.includes(toolName)) {
@@ -477,6 +477,10 @@ async function executeTool(toolName, toolInput, sessionTabGroupId = null, mcpSes
   // Use extracted handler if available
   if (hasHandler(toolName)) {
     const deps = {
+      // Trusted session state for tool side effects. visualMode gates the
+      // post-scroll auto-screenshot (REQ-001); it comes from the session, never
+      // from LLM tool input (CON-005). Text-only by default.
+      sessionOptions: { visualMode: mcpSession?.visualMode === true },
       sendDebuggerCommand,
       ensureDebugger: (tabId) => ensureDebugger(tabId, sessionId),
       log: taskLog,

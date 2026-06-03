@@ -51,7 +51,7 @@ export const TOOL_DEFINITIONS = [
 
   {
     name: 'form_input',
-    description: `Set values in ANY form element — text inputs, textareas, native <select> dropdowns, custom React/Workday/MUI dropdown comboboxes, checkboxes, radio buttons, date pickers, and number inputs. For dropdowns (both native and custom), just pass the desired option text as the value — the tool automatically opens the dropdown, searches, and selects the match. This is the FASTEST way to fill any form field (1 tool call vs 5-10 with computer clicks). ALWAYS prefer form_input over computer clicks for form fields. tabId is optional — if omitted, the active tab in your window is used automatically.`,
+    description: `Set values in ANY form element — text inputs, textareas, native <select> dropdowns, custom React/Workday/MUI dropdown comboboxes, checkboxes, radio buttons, date pickers, and number inputs. For dropdowns (both native and custom), just pass the desired option text as the value — the tool automatically opens the dropdown, searches, and selects the match. This is the FASTEST way to fill any form field (1 tool call vs 5-10 with computer clicks). ALWAYS prefer form_input over computer clicks for form fields. When filling a known multi-field form, issue several form_input calls in the SAME turn, then verify once with read_page — don't read after each field. tabId is optional — if omitted, the active tab in your window is used automatically.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -75,7 +75,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: 'computer',
     description: `Use a mouse and keyboard to interact with a web browser, and take screenshots. tabId is optional — if omitted, the active tab in your window is used automatically.
-* Whenever you intend to click on an element like an icon, you should consult a screenshot to determine the coordinates of the element before moving the cursor.
+* Prefer clicking by element reference (the numeric backendNodeId from read_page or find) — it needs no coordinates. Only consult a screenshot to find coordinates when no reference is available, or for canvas-style apps that read_page cannot see.
 * If you tried clicking on a program or link but it failed to load, even after waiting, try adjusting your click location so that the tip of the cursor visually falls on the element that you want to click.
 * Make sure to click any buttons, links, icons, etc with the cursor tip in the center of the element. Don't click boxes on their edges unless asked.`,
     input_schema: {
@@ -210,6 +210,39 @@ export const TOOL_DEFINITIONS = [
         max_chars: {
           type: 'number',
           description: 'Maximum characters for output (default: 50000). Set to a higher value if your client can handle large outputs.',
+        },
+      },
+      required: [],
+    },
+  },
+
+  {
+    name: 'collect_page_text',
+    description: `Gather a long or virtualized list (chat history, feed, search results, comments) in ONE call. It scrolls the page internally, reads the rendered text at each step, de-duplicates rows across virtualized re-renders, and returns the collected text — so you do NOT loop scroll+read yourself. Strongly prefer this over repeated computer scroll + get_page_text/read_page when you need many items from a long list. Returns text only (no screenshot). For the newest N messages of a chat, use direction "up" with count N. The result reports reachedBoundary (true = hit the list end) and truncated (true = hit the scroll limit, call again to continue). tabId is optional — if omitted, the active tab in your window is used automatically.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        direction: {
+          type: 'string',
+          enum: ['up', 'down'],
+          description: 'Scroll direction. "down" (default) reads top→bottom; "up" starts at the bottom and reads newest→older — use for the newest messages of a chat.',
+        },
+        count: {
+          type: 'number',
+          description: 'Target number of items to collect (e.g. the newest 100). Stops once reached. Omit to gather as much as possible within maxScrolls.',
+        },
+        maxScrolls: {
+          type: 'number',
+          description: 'Safety bound on scroll iterations (default 20, max 50). If hit before the list end, truncated is true and you can call again.',
+        },
+        startPosition: {
+          type: 'string',
+          enum: ['top', 'bottom', 'current'],
+          description: 'Where to start. Defaults to "top" for direction "down" and "bottom" for direction "up".',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Tab ID to collect from. Optional — if omitted, uses the active tab in your window.',
         },
       },
       required: [],

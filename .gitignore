@@ -86,3 +86,8 @@ vertex-sa.json
 *.mp4
 pitchdeck.*
 readme-preview.html
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
