@@ -139,10 +139,42 @@ async function frameInPage(doScroll, direction, overlap, position) {
 
   const root = isDoc ? document.body : scroller;
   const items = [];
-  for (const line of (root.innerText || '').split('\n')) {
-    const t = line.replace(/\s+/g, ' ').trim();
-    if (t) items.push(t);
+
+  // Prefer structured rows (chat messages, list/feed items) so each row stays
+  // ONE item with its author/timestamp/text intact. Raw innerText splitting
+  // would shatter a message into separate author/timestamp/text lines, which
+  // breaks count semantics (counts lines, not messages) and author attribution.
+  let rows = [];
+  const rowSelectors = [
+    'li',
+    '[role="listitem"]',
+    '[role="article"]',
+    '[class*="messageListItem"]',
+    '[class*="message-row"]',
+  ];
+  for (const sel of rowSelectors) {
+    const found = Array.from(root.querySelectorAll(sel)).filter((el) => (el.innerText || '').trim());
+    // Keep only outermost matches so nested rows aren't double-counted.
+    const outer = found.filter((el) => !found.some((o) => o !== el && o.contains(el)));
+    if (outer.length >= 3) {
+      rows = outer;
+      break;
+    }
   }
+
+  if (rows.length >= 3) {
+    for (const el of rows) {
+      const t = (el.innerText || '').replace(/\s+/g, ' ').trim();
+      if (t) items.push(t);
+    }
+  } else {
+    // Fallback: no obvious row structure — split visible text into lines.
+    for (const line of (root.innerText || '').split('\n')) {
+      const t = line.replace(/\s+/g, ' ').trim();
+      if (t) items.push(t);
+    }
+  }
+
   const scrollPos = isDoc
     ? window.scrollY || document.documentElement.scrollTop || 0
     : scroller.scrollTop;
