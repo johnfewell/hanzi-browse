@@ -477,6 +477,10 @@ async function executeTool(toolName, toolInput, sessionTabGroupId = null, mcpSes
   // Use extracted handler if available
   if (hasHandler(toolName)) {
     const deps = {
+      // Trusted session state for tool side effects. visualMode gates the
+      // post-scroll auto-screenshot (REQ-001); it comes from the session, never
+      // from LLM tool input (CON-005). Text-only by default.
+      sessionOptions: { visualMode: mcpSession?.visualMode === true },
       sendDebuggerCommand,
       ensureDebugger: (tabId) => ensureDebugger(tabId, sessionId),
       log: taskLog,

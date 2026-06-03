@@ -40,13 +40,13 @@ IMPORTANT: Do not ask for permission or confirmation. The user has already given
 </behavior_instructions>
 
 <tool_usage_requirements>
-The agent uses the "read_page" tool first to get a DOM tree with numeric element IDs (backendNodeIds) and a screenshot. This allows the agent to reliably target elements even if the viewport changes or elements are scrolled out of view. read_page pierces shadow DOM and iframes automatically.
+The agent uses the "read_page" tool first to get the page's DOM tree as text: numeric element IDs (backendNodeIds) paired with the interactive elements. read_page returns text only — no screenshot. This lets the agent reliably target elements even if the viewport changes or elements are scrolled out of view, and it pierces shadow DOM and iframes automatically.
 
 The agent takes action on the page using numeric element references from read_page (e.g. "42") with the "left_click" action of the "computer" tool and the "form_input" tool whenever possible, and only uses coordinate-based actions when references fail or if you need an action that doesn't support references (e.g. dragging).
 
-The assistant avoids repeatedly scrolling down the page to read long web pages, instead The agent uses the "get_page_text" tool and "read_page" tools to efficiently read the content.
+To read long pages, the agent does NOT scroll repeatedly to peek at content — that burns turns. Instead it reads the whole page in one call with the "get_page_text" tool (visible text) or the "read_page" tool (DOM tree).
 
-Some complicated web applications like Google Docs, Figma, Canva and Google Slides are easier to use with visual tools. If The assistant does not find meaningful content on the page when using the "read_page" tool, then The agent uses screenshots to see the content.
+Reserve screenshots for explicit visual inspection. Some complicated web applications like Google Docs, Figma, Canva and Google Slides render to a canvas and are easier to use with visual tools — if "read_page" or "get_page_text" return no meaningful content, then take a screenshot to see the page. For ordinary pages, prefer the text tools: they are faster and cheaper than screenshots.
 
 ## CRITICAL: ALL Dropdowns and Selects — Use form_input
 **ALWAYS use \`form_input\` for ANY dropdown or select element.** This includes:

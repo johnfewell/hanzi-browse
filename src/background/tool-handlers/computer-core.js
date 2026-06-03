@@ -329,7 +329,7 @@ async function handleScreenshot(tabId) {
  * @returns {Promise<Object>} Tool result
  */
 // eslint-disable-next-line complexity, sonarjs/cognitive-complexity, max-lines-per-function
-export async function handleComputer(input) {
+export async function handleComputer(input, deps = {}) {
   try {
     const toolInput = input || {};
     if (!toolInput.action) {
@@ -361,6 +361,10 @@ export async function handleComputer(input) {
     const originalUrl = tab.url;
     // Check if anti-bot simulation is needed for this domain
     const antiBot = isAntiBotEnabled(originalUrl);
+    // Trusted session state gates visual side effects (e.g. the post-scroll
+    // auto-screenshot). Read only from deps so LLM tool input can never enable
+    // it (CON-005). Defaults to text-only — the cheap, low-turn path (REQ-001).
+    const visualMode = deps?.sessionOptions?.visualMode === true;
     let result;
 
     switch (toolInput.action) {
@@ -484,18 +488,22 @@ export async function handleComputer(input) {
             await new Promise((resolve) => setTimeout(resolve, 200));
           }
 
-          // Automatically capture a screenshot after scrolling
-          // Source: tools-and-permissions.js lines 6055-6074
-          const screenshotResult = await (async () => {
-            try {
-              const screenshot = await handleScreenshot(tabId);
-              return screenshot.base64Image
-                ? { base64Image: screenshot.base64Image, imageFormat: screenshot.imageFormat || "png" }
-                : undefined;
-            } catch {
-              return undefined;
-            }
-          })();
+          // Visual mode only: attach a screenshot after scrolling. By default a
+          // scroll returns status text alone — the auto-screenshot dominated LLM
+          // turn cost (REQ-001). Explicit action:"screenshot" still works in any
+          // mode; visualMode is trusted session state, never LLM input (CON-005).
+          const screenshotResult = visualMode
+            ? await (async () => {
+                try {
+                  const screenshot = await handleScreenshot(tabId);
+                  return screenshot.base64Image
+                    ? { base64Image: screenshot.base64Image, imageFormat: screenshot.imageFormat || "png" }
+                    : undefined;
+                } catch {
+                  return undefined;
+                }
+              })()
+            : undefined;
 
           const scrollMode = antiBot ? " (human-like)" : "";
           result = {
