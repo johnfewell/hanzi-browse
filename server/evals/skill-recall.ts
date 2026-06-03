@@ -5,8 +5,8 @@
  *
  * Usage: npx tsx server/evals/skill-recall.ts [--fail-fast] [--only <id>] [--model <name>]
  *
- * Uses the project's shared LLM client (Vertex Gemini in managed mode,
- * Anthropic otherwise). Cost: ~20 cases × ~600 tokens ≈ $0.01 on Haiku.
+ * Uses the project's shared LLM client (Anthropic). Cost: ~20 cases ×
+ * ~600 tokens ≈ $0.01 on Haiku.
  */
 
 import { readFileSync } from "fs";

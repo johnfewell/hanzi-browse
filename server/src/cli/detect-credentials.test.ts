@@ -21,11 +21,6 @@ describe('detectCredentialSources (expanded)', () => {
     expect(found.some(s => s.slug === 'openai-env')).toBe(true);
   });
 
-  it('detects HANZI_API_KEY (managed)', () => {
-    const found = detectCredentialSources(make({ env: { HANZI_API_KEY: 'hic_live_...' } }));
-    expect(found.some(s => s.slug === 'hanzi-managed')).toBe(true);
-  });
-
   it('still detects Claude Code and Codex', () => {
     const found = detectCredentialSources(make({
       fileExists: (p: string) => p === '/home/u/.claude/.credentials.json' || p === '/home/u/.codex/auth.json',

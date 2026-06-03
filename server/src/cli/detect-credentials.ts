@@ -4,15 +4,14 @@
  * Covers env vars (static API keys), file-based OAuth (Claude Code, Codex),
  * and Keychain (Claude Code on macOS).
  *
- * Priority ordering (first = most preferred): managed > static env > OAuth file > Keychain > Codex.
+ * Priority ordering (first = most preferred): static env > OAuth file > Keychain > Codex.
  */
 
 import { join } from 'path';
 
 export type CredentialSlug =
   | 'claude' | 'codex'
-  | 'anthropic-env' | 'openai-env' | 'google-env' | 'openrouter-env'
-  | 'hanzi-managed';
+  | 'anthropic-env' | 'openai-env' | 'google-env' | 'openrouter-env';
 
 export interface CredentialSource {
   name: string;
@@ -39,11 +38,6 @@ const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 export function detectCredentialSources(opts: DetectOptions): CredentialSource[] {
   const { platform, homedir, fileExists, keychainHas, env = process.env } = opts;
   const found: CredentialSource[] = [];
-
-  // Managed takes precedence — zero fragility, server-side LLM
-  if (env.HANZI_API_KEY) {
-    found.push({ name: 'Hanzi Managed', slug: 'hanzi-managed', path: 'HANZI_API_KEY env var' });
-  }
 
   // Static API keys
   if (env.ANTHROPIC_API_KEY) {
