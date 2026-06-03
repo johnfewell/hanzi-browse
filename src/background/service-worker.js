@@ -12,7 +12,8 @@ import { getDomainSkills } from './modules/domain-skills.js';
 import {
   loadConfig, getConfig, setConfig,
   createAbortController, abortRequest,
-  callLLM, callLLMSimple, resetApiCallCounter, getApiCallCount, isClaudeProvider, resolveAgentDefaultConfig
+  callLLM, callLLMSimple, resetApiCallCounter, getApiCallCount, isClaudeProvider, resolveAgentDefaultConfig,
+  derivePhase, tierForPhase
 } from './modules/api.js';
 import { getMemoryStats } from './modules/memory-manager.js';
 import { compactIfNeeded, calculateContextTokens } from './modules/conversation-compaction.js';
@@ -776,6 +777,10 @@ ${mcpSession.context}</system-reminder>`,
   // Track injected MCP messages (for mid-execution message injection)
   let mcpMessagesInjected = mcpSession ? mcpSession.messages.length : 0;
 
+  // Phase-based model tiering (Phase 4): remember last turn's tools so the next
+  // turn's phase can be derived from trusted loop state, never from the model.
+  let prevTurnToolNames = [];
+
   while (steps < maxSteps) {
     // Check if this run was cancelled
     if (isRunCancelled()) {
@@ -812,6 +817,14 @@ ${mcpSession.context}</system-reminder>`,
       : callLLM;
     messages = await compactIfNeeded(messages, compactionLLM, taskLog);
 
+    // Phase-based model tiering (Phase 4): derive this turn's phase from loop
+    // state and route low-risk phases (observe/navigate) to the fast tier.
+    // decide/compose/finalize fall through to the session default model.
+    const phase = derivePhase({ turnNumber: steps, prevToolNames: prevTurnToolNames, taskIntent: task });
+    const modelTier = tierForPhase(phase);
+    const tierLabel = modelTier ? `tier=${modelTier}` : 'tier=default';
+    await taskLog('TIER', `Turn ${steps}: phase=${phase} ${tierLabel}`);
+
     let response;
     try {
       const llmPromise = callLLM(
@@ -820,7 +833,10 @@ ${mcpSession.context}</system-reminder>`,
         taskLog,
         currentTabUrl,
         mcpSession?.abortController?.signal,
-        mcpSession ? { configOverride: mcpSession.modelConfig } : {}
+        {
+          ...(mcpSession ? { configOverride: mcpSession.modelConfig } : {}),
+          ...(modelTier ? { modelTier } : {}),
+        }
       );
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
@@ -856,6 +872,8 @@ ${mcpSession.context}</system-reminder>`,
     messages.push({ role: 'assistant', content: response.content });
 
     const toolUses = response.content.filter(b => b.type === 'tool_use');
+    // Record this turn's tools so the NEXT turn's phase derivation can see them.
+    prevTurnToolNames = toolUses.map(tu => tu.name);
 
     // Always send any text content as a message (even if there are also tool uses)
     const textBlock = response.content.find(b => b.type === 'text');

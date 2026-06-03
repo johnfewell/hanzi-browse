@@ -258,6 +258,63 @@ function buildEffectiveConfig(overrides = {}) {
 }
 
 /**
+ * Phase-based model tiering (Phase 4 / REQ-004a).
+ *
+ * Derives the task phase for the UPCOMING turn from trusted loop state — we
+ * never ask the model to declare its own phase. Low-risk phases (observe,
+ * navigate) may run on a faster tier; decide/compose/finalize and anything
+ * unclassified stay on the default model (REQ-004b/c, CON-004).
+ */
+const BULK_READ_TOOLS = new Set(['read_page', 'get_page_text', 'collect_page_text']);
+// A task whose intent is to write or send content keeps the default model
+// end-to-end, so a weaker model never composes or submits on the user's behalf.
+const COMPOSE_INTENT_RE =
+  /\b(post|posts|posting|repl(?:y|ies|ying)|respond|comment|comments|message|messages|messaging|dm|send|sends|sending|write|writing|draft|drafts|compose|publish|tweet|tweets|email|e-mail|submit)\b/i;
+
+/**
+ * @param {Object} state
+ * @param {number} [state.turnNumber=1] - 1-based loop turn about to run.
+ * @param {string[]} [state.prevToolNames=[]] - Tool names executed last turn.
+ * @param {string} [state.taskIntent=''] - The task text (used for compose/finalize).
+ * @returns {'observe'|'decide'|'navigate'|'compose'}
+ */
+export function derivePhase({ turnNumber = 1, prevToolNames = [], taskIntent = '' } = {}) {
+  // Compose/finalize is decided from task intent (we can't know per-turn that the
+  // model is about to type/submit), so a compose task is default-tier throughout.
+  if (COMPOSE_INTENT_RE.test(taskIntent || '')) return 'compose';
+  // First turn just looks at the initial page — low risk.
+  if (turnNumber <= 1) return 'observe';
+  // Right after a bulk read/collection the model must reason over gathered
+  // content; keep that on the default tier.
+  if (Array.isArray(prevToolNames) && prevToolNames.some((t) => BULK_READ_TOOLS.has(t))) {
+    return 'decide';
+  }
+  // Otherwise mechanical navigation/interaction.
+  return 'navigate';
+}
+
+const FAST_TIER_PHASES = new Set(['observe', 'navigate']);
+
+/**
+ * Resolve which tier (if any) a callLLM invocation should use: an explicit
+ * modelOverride always wins over a phase tier.
+ */
+function modelTierForCall(options) {
+  return options.modelOverride ? null : options.modelTier;
+}
+
+/**
+ * Map a phase to a model tier. Only low-risk phases get the fast tier; every
+ * other phase (decide/compose/finalize and any unrecognized value) returns null
+ * so the caller keeps the default model — the hard floor (REQ-004c).
+ * @param {string} phase
+ * @returns {'fast'|null}
+ */
+export function tierForPhase(phase) {
+  return FAST_TIER_PHASES.has(phase) ? 'fast' : null;
+}
+
+/**
  * Simple LLM API call (for quick tasks like summarization, find tool, etc.)
  * Routes through native host to use keychain credentials (same as streaming API).
  *
@@ -1071,10 +1128,16 @@ function normalizeCodexResponse(response) {
 export async function callLLM(messages, onTextChunk = null, log = () => {}, currentUrl = null, externalSignal = null, options = {}) {
   await loadConfig();
 
-  const effectiveConfig = buildEffectiveConfig({
+  let effectiveConfig = buildEffectiveConfig({
     ...(options.configOverride || {}),
     ...(options.modelOverride ? { model: options.modelOverride } : {}),
   });
+
+  // Phase-based model tiering (Phase 4): route low-risk turns to a faster model.
+  // The tier replaces the per-session default model for this turn only, and is a
+  // no-op for providers without a tier map (and for a null/absent tier), so it
+  // can never regress quality.
+  effectiveConfig = resolveConfigWithTier(effectiveConfig, modelTierForCall(options));
 
   // Debug: log config values
   console.log('[API] Config loaded:', {

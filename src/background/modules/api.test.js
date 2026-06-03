@@ -1,12 +1,14 @@
 import {
   abortRequest,
   createAbortController,
+  derivePhase,
   getApiHeaders,
   getConfig,
   isClaudeProvider,
   loadConfig,
   resolveAgentDefaultConfig,
   setConfig,
+  tierForPhase,
 } from './api';
 
 describe('background api config helpers', () => {
@@ -133,5 +135,59 @@ describe('background api config helpers', () => {
     abortRequest();
     expect(controller.signal.aborted).toBe(true);
     expect(getConfig()).toBeTruthy();
+  });
+});
+
+describe('phase-based model tiering (Phase 4)', () => {
+  // These encode the safety contract: only low-risk phases may use the fast
+  // tier, and consequential phases (decide/compose/finalize) never do. The
+  // phase is derived from loop state — the model is never asked to declare it.
+
+  it('derives observe on the first turn → fast tier', () => {
+    const phase = derivePhase({ turnNumber: 1, prevToolNames: [], taskIntent: 'find the cheapest flight' });
+    expect(phase).toBe('observe');
+    expect(tierForPhase(phase)).toBe('fast');
+  });
+
+  it('derives decide after a bulk read/collection → default tier', () => {
+    for (const tool of ['read_page', 'get_page_text', 'collect_page_text']) {
+      const phase = derivePhase({ turnNumber: 3, prevToolNames: [tool], taskIntent: 'summarize the results' });
+      expect(phase).toBe('decide');
+      // Hard floor: a turn reasoning over freshly gathered content stays default.
+      expect(tierForPhase(phase)).toBeNull();
+    }
+  });
+
+  it('derives navigate for ordinary interaction turns → fast tier', () => {
+    const phase = derivePhase({ turnNumber: 4, prevToolNames: ['computer'], taskIntent: 'open my dashboard' });
+    expect(phase).toBe('navigate');
+    expect(tierForPhase(phase)).toBe('fast');
+  });
+
+  it('keeps compose/send tasks on the default tier end-to-end (AC-005, CON-004)', () => {
+    // Intent words like reply/post/send/message must pin the whole task to the
+    // default model so a weaker model never writes or sends on the user's behalf.
+    for (const intent of [
+      'reply to my latest LinkedIn message',
+      'post this update to X',
+      'send a DM to Sam',
+      'draft and submit the contact form',
+    ]) {
+      // Even on turn 1, a compose task must not drop to fast.
+      const phase = derivePhase({ turnNumber: 1, prevToolNames: [], taskIntent: intent });
+      expect(phase).toBe('compose');
+      expect(tierForPhase(phase)).toBeNull();
+    }
+  });
+
+  it('never returns the fast tier for decide/compose/finalize or unknown phases (AC-013)', () => {
+    for (const phase of ['decide', 'compose', 'finalize', 'something-else', '', undefined]) {
+      expect(tierForPhase(phase)).toBeNull();
+    }
+  });
+
+  it('defaults to navigate (not a crash) when state is missing', () => {
+    expect(derivePhase()).toBe('observe'); // no turnNumber → treated as first turn
+    expect(derivePhase({ turnNumber: 2 })).toBe('navigate'); // no prev tools, no intent
   });
 });
