@@ -25,4 +25,6 @@ export declare function appendSessionLog(sessionId: string, message: string): vo
 export declare function readSessionLog(sessionId: string, lines?: number): string;
 export declare function listSessions(): SessionFileStatus[];
 export declare function listActiveSessions(): SessionFileStatus[];
+export declare const SESSION_TTL_MS: number;
+export declare function pruneOldSessions(): string[];
 export declare function deleteSessionFiles(sessionId: string): boolean;

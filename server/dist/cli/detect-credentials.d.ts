@@ -1,15 +1,15 @@
 /**
- * Credential source detection for CLI setup.
+ * Credential source detection for CLI setup + doctor.
  *
- * Claude Code stores OAuth tokens in one of two locations:
- *   1. ~/.claude/.credentials.json (file-based, all platforms)
- *   2. macOS Keychain under "Claude Code-credentials" (macOS only)
+ * Covers env vars (static API keys), file-based OAuth (Claude Code, Codex),
+ * and Keychain (Claude Code on macOS).
  *
- * The original implementation only checked (1), missing most macOS users.
+ * Priority ordering (first = most preferred): static env > OAuth file > Keychain > Codex.
  */
+export type CredentialSlug = 'claude' | 'codex' | 'anthropic-env' | 'openai-env' | 'google-env' | 'openrouter-env';
 export interface CredentialSource {
     name: string;
-    slug: 'claude' | 'codex';
+    slug: CredentialSlug;
     path: string;
 }
 export interface DetectOptions {
@@ -17,6 +17,7 @@ export interface DetectOptions {
     homedir: string;
     fileExists: (path: string) => boolean;
     keychainHas: (service: string) => boolean;
+    env?: Record<string, string | undefined>;
 }
 export interface CredentialFlowState {
     sourcesDetected: number;

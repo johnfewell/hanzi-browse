@@ -1,7 +1,7 @@
 export function buildTaskCompletePayload(sessionId, result) {
     return {
         session_id: sessionId,
-        status: 'completed',
+        status: 'complete',
         result,
     };
 }

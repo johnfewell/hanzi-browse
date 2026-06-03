@@ -30,6 +30,24 @@ if (process.argv[2] === 'telemetry') {
     }
     process.exit(0);
 }
+// If invoked with a CLI subcommand, delegate to cli.js.
+// With no arguments, fall through to MCP stdio mode (how MCP clients launch it).
+{
+    const CLI_SUBCOMMANDS = new Set([
+        'start', 'status', 'message', 'logs', 'stop', 'screenshot',
+        'skills', 'setup', 'doctor', 'help',
+        '--help', '-h', '--version', '-v',
+    ]);
+    const firstArg = process.argv[2];
+    if (firstArg && CLI_SUBCOMMANDS.has(firstArg)) {
+        // Import and explicitly await cli's main() so async commands (doctor,
+        // --detach's disconnect delay, network fetches) finish before we exit.
+        // Without the await, process.exit below would race and kill them mid-flight.
+        const { main } = await import('./cli.js');
+        await main();
+        process.exit(0);
+    }
+}
 import { initTelemetry, trackEvent, captureException, shutdownTelemetry } from "./telemetry.js";
 initTelemetry();
 trackEvent("mcp_start");
@@ -50,50 +68,6 @@ import { exec } from "child_process";
 import { describeCredentials, resolveCredentials } from "./llm/credentials.js";
 import { callLLM } from "./llm/client.js";
 import { checkAndIncrementUsage, getLicenseStatus } from "./license/manager.js";
-// --- Managed proxy mode ---
-// When HANZI_API_KEY is set, tasks are proxied to the managed API instead of
-// running locally. This lets users without their own LLM key use Hanzi managed.
-const MANAGED_API_KEY = process.env.HANZI_API_KEY;
-const MANAGED_API_URL = process.env.HANZI_API_URL || "https://api.hanzilla.co";
-const IS_MANAGED_MODE = !!MANAGED_API_KEY;
-async function managedApiCall(method, path, body) {
-    const res = await fetch(`${MANAGED_API_URL}${path}`, {
-        method,
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${MANAGED_API_KEY}` },
-        body: body ? JSON.stringify(body) : undefined,
-    });
-    return res.json();
-}
-async function runManagedTask(task, url, context) {
-    // Find a connected browser session
-    const sessionsRes = await managedApiCall("GET", "/v1/browser-sessions");
-    const connected = sessionsRes?.sessions?.find((s) => s.status === "connected");
-    if (!connected) {
-        return { status: "error", answer: "No browser connected. Open Chrome with the Hanzi extension and pair it first.", steps: 0 };
-    }
-    // Create task
-    const created = await managedApiCall("POST", "/v1/tasks", {
-        task, url, context, browser_session_id: connected.id,
-    });
-    if (created.error)
-        return { status: "error", answer: created.error, steps: 0 };
-    // Poll until done (max 5 min)
-    const taskId = created.id;
-    const deadline = Date.now() + TASK_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 2000));
-        const status = await managedApiCall("GET", `/v1/tasks/${taskId}`);
-        if (status.status !== "running") {
-            return {
-                status: status.status,
-                answer: status.answer || "No answer.",
-                steps: status.steps || 0,
-                error: status.error,
-            };
-        }
-    }
-    return { status: "timeout", answer: "Task still running. Check back later.", steps: 0 };
-}
 const sessions = new Map();
 const pendingScreenshots = new Map();
 // Max time a task can run before we return (configurable, default 5 minutes)
@@ -359,15 +333,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 if (!task?.trim()) {
                     return { content: [{ type: "text", text: "Error: task cannot be empty" }], isError: true };
                 }
-                // --- Managed proxy mode: forward to api.hanzilla.co ---
-                if (IS_MANAGED_MODE) {
-                    console.error(`[MCP] Managed mode — proxying task to ${MANAGED_API_URL}`);
-                    const result = await runManagedTask(task, url, context);
-                    return {
-                        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-                        isError: result.status === "error",
-                    };
-                }
                 // --- Local BYOM mode ---
                 // Check license / usage limit
                 const usage = await checkAndIncrementUsage();
@@ -542,18 +507,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // --- Startup ---
 async function main() {
     console.error("[MCP] Starting Hanzi Browse MCP Server v2.0...");
-    if (IS_MANAGED_MODE) {
-        console.error(`[MCP] Mode: MANAGED (proxying tasks to ${MANAGED_API_URL})`);
-        console.error(`[MCP] API key: ${MANAGED_API_KEY.slice(0, 20)}...`);
-    }
-    else {
-        console.error("[MCP] Mode: BYOM (local agent loop)");
-        // Startup diagnostics
-        const credDesc = describeCredentials();
-        console.error(`[MCP] Credentials: ${credDesc}`);
-        const licenseStatus = getLicenseStatus();
-        console.error(`[MCP] License: ${licenseStatus.message}`);
-    }
+    console.error("[MCP] Mode: BYOM (local agent loop)");
+    // Startup diagnostics
+    const credDesc = describeCredentials();
+    console.error(`[MCP] Credentials: ${credDesc}`);
+    const licenseStatus = getLicenseStatus();
+    console.error(`[MCP] License: ${licenseStatus.message}`);
     connection = new WebSocketClient({
         role: "mcp",
         autoStartRelay: true,

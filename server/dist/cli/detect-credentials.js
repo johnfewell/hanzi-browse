@@ -1,19 +1,30 @@
 /**
- * Credential source detection for CLI setup.
+ * Credential source detection for CLI setup + doctor.
  *
- * Claude Code stores OAuth tokens in one of two locations:
- *   1. ~/.claude/.credentials.json (file-based, all platforms)
- *   2. macOS Keychain under "Claude Code-credentials" (macOS only)
+ * Covers env vars (static API keys), file-based OAuth (Claude Code, Codex),
+ * and Keychain (Claude Code on macOS).
  *
- * The original implementation only checked (1), missing most macOS users.
+ * Priority ordering (first = most preferred): static env > OAuth file > Keychain > Codex.
  */
 import { join } from 'path';
-// ── Constants ────────────────────────────────────────────────────────
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
-// ── Detection ────────────────────────────────────────────────────────
 export function detectCredentialSources(opts) {
-    const { platform, homedir, fileExists, keychainHas } = opts;
+    const { platform, homedir, fileExists, keychainHas, env = process.env } = opts;
     const found = [];
+    // Static API keys
+    if (env.ANTHROPIC_API_KEY) {
+        found.push({ name: 'Anthropic API key', slug: 'anthropic-env', path: 'ANTHROPIC_API_KEY env var' });
+    }
+    if (env.OPENAI_API_KEY) {
+        found.push({ name: 'OpenAI API key', slug: 'openai-env', path: 'OPENAI_API_KEY env var' });
+    }
+    if (env.GEMINI_API_KEY || env.GOOGLE_API_KEY) {
+        found.push({ name: 'Google API key', slug: 'google-env', path: 'GEMINI_API_KEY or GOOGLE_API_KEY env var' });
+    }
+    if (env.OPENROUTER_API_KEY) {
+        found.push({ name: 'OpenRouter API key', slug: 'openrouter-env', path: 'OPENROUTER_API_KEY env var' });
+    }
+    // Claude Code (file, then Keychain on macOS)
     const claudePath = join(homedir, '.claude', '.credentials.json');
     if (fileExists(claudePath)) {
         found.push({ name: 'Claude Code', slug: 'claude', path: claudePath });
@@ -21,6 +32,7 @@ export function detectCredentialSources(opts) {
     else if (platform === 'darwin' && keychainHas(KEYCHAIN_SERVICE)) {
         found.push({ name: 'Claude Code', slug: 'claude', path: 'macOS Keychain' });
     }
+    // Codex
     const codexPath = join(homedir, '.codex', 'auth.json');
     if (fileExists(codexPath)) {
         found.push({ name: 'Codex CLI', slug: 'codex', path: codexPath });

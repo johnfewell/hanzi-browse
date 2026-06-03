@@ -4,7 +4,7 @@
  * Manages file-based session storage for the CLI.
  * Sessions are stored as JSON files in ~/.hanzi-browse/sessions/
  */
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, appendFileSync, unlinkSync, renameSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 // Session directory
@@ -41,7 +41,11 @@ export function writeSessionStatus(sessionId, status) {
         ...status,
         updated_at: new Date().toISOString(),
     };
-    writeFileSync(filePath, JSON.stringify(updated, null, 2));
+    // Atomic write: write to .tmp + rename. rename(2) on the same filesystem is atomic;
+    // readers see either the old file or the new one — never a torn partial write.
+    const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(updated, null, 2));
+    renameSync(tmpPath, filePath);
 }
 function createInitialStatus(sessionId) {
     const now = new Date().toISOString();
@@ -101,6 +105,28 @@ export function listSessions() {
 export function listActiveSessions() {
     return listSessions().filter(s => s.status === 'starting' ||
         s.status === 'running');
+}
+export const SESSION_TTL_MS = Number(process.env.HANZI_SESSION_TTL_MS) || 7 * 24 * 3600_000; // 7 days
+export function pruneOldSessions() {
+    ensureSessionDir();
+    const cutoff = Date.now() - SESSION_TTL_MS;
+    const removed = [];
+    for (const f of readdirSync(SESSION_DIR)) {
+        if (!f.endsWith('.json'))
+            continue;
+        const sessionId = f.replace(/\.json$/, '');
+        const s = readSessionStatus(sessionId);
+        if (!s)
+            continue;
+        // Only prune terminal states
+        if (s.status !== 'complete' && s.status !== 'error' && s.status !== 'stopped')
+            continue;
+        if (new Date(s.updated_at).getTime() < cutoff) {
+            deleteSessionFiles(sessionId);
+            removed.push(sessionId);
+        }
+    }
+    return removed;
 }
 export function deleteSessionFiles(sessionId) {
     const statusPath = getSessionFilePath(sessionId);
