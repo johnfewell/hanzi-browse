@@ -79,11 +79,6 @@ import { describeCredentials, resolveCredentials } from "./llm/credentials.js";
 import { callLLM } from "./llm/client.js";
 import { checkAndIncrementUsage, getLicenseStatus } from "./license/manager.js";
 
-// --- Managed proxy mode ---
-// When HANZI_API_KEY is set, tasks are proxied to the managed API instead of
-// running locally. This lets users without their own LLM key use Hanzi managed.
-import { IS_MANAGED_MODE, MANAGED_API_KEY, MANAGED_API_URL, runManagedTask } from "./cli/managed-client.js";
-
 // --- Session tracking ---
 
 interface Session {
@@ -430,16 +425,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return { content: [{ type: "text", text: "Error: task cannot be empty" }], isError: true };
         }
 
-        // --- Managed proxy mode: forward to api.hanzilla.co ---
-        if (IS_MANAGED_MODE) {
-          console.error(`[MCP] Managed mode — proxying task to ${MANAGED_API_URL}`);
-          const result = await runManagedTask(task, url, context, TASK_TIMEOUT_MS);
-          return {
-            content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-            isError: result.status === "error",
-          };
-        }
-
         // --- Local BYOM mode ---
 
         // Check license / usage limit
@@ -646,17 +631,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   console.error("[MCP] Starting Hanzi Browse MCP Server v2.0...");
 
-  if (IS_MANAGED_MODE) {
-    console.error(`[MCP] Mode: MANAGED (proxying tasks to ${MANAGED_API_URL})`);
-    console.error(`[MCP] API key: ${MANAGED_API_KEY!.slice(0, 20)}...`);
-  } else {
-    console.error("[MCP] Mode: BYOM (local agent loop)");
-    // Startup diagnostics
-    const credDesc = describeCredentials();
-    console.error(`[MCP] Credentials: ${credDesc}`);
-    const licenseStatus = getLicenseStatus();
-    console.error(`[MCP] License: ${licenseStatus.message}`);
-  }
+  console.error("[MCP] Mode: BYOM (local agent loop)");
+  // Startup diagnostics
+  const credDesc = describeCredentials();
+  console.error(`[MCP] Credentials: ${credDesc}`);
+  const licenseStatus = getLicenseStatus();
+  console.error(`[MCP] License: ${licenseStatus.message}`);
 
   connection = new WebSocketClient({
     role: "mcp",

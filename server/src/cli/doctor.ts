@@ -5,15 +5,12 @@ import { detectCredentialSources, type CredentialSource } from './detect-credent
 import { listSessions } from './session-files.js';
 import { isRelayRunning } from '../relay/auto-start.js';
 import type { SessionFileStatus } from './session-files.js';
-import { getBillingStatus, IS_MANAGED_MODE, MANAGED_DASHBOARD_URL, type BillingStatus } from './managed-client.js';
 
 export interface DoctorReport {
   extensionConnected: boolean;
   relayReachable: boolean;
   credentials: CredentialSource[];
   recentSessions: SessionFileStatus[];
-  apiReachable: boolean;
-  billing: BillingStatus | null;
 }
 
 function keychainHas(service: string): boolean {
@@ -34,24 +31,11 @@ export async function runDoctor(): Promise<DoctorReport> {
   });
   const recentSessions = listSessions().slice(0, 3);
 
-  let apiReachable = false;
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch('https://api.hanzilla.co/v1/health', { signal: controller.signal });
-    clearTimeout(t);
-    apiReachable = res.status < 500;
-  } catch { /* keep false */ }
-
-  const billing = IS_MANAGED_MODE ? await getBillingStatus() : null;
-
   return {
     extensionConnected: relayReachable, // relay up ≈ extension connected
     relayReachable,
     credentials,
     recentSessions,
-    apiReachable,
-    billing,
   };
 }
 
@@ -73,19 +57,6 @@ export function renderDoctorReport(r: DoctorReport): string {
   } else {
     lines.push(`  ${sym(false)}  No credentials found. Set HANZI_API_KEY, ANTHROPIC_API_KEY, or run \`claude login\`.`);
   }
-
-  if (r.billing) {
-    const ok = r.billing.free_remaining > 0 || r.billing.credit_balance > 0;
-    const totalTasks = r.billing.free_remaining + r.billing.credit_balance;
-    lines.push(`  ${sym(ok)}  Managed tasks available: ${r.billing.free_remaining} free + ${r.billing.credit_balance} credits (${totalTasks} total)`);
-    if (!ok) {
-      lines.push(`        ⚠️  Out of credits. Add more at ${MANAGED_DASHBOARD_URL}`);
-    } else if (r.billing.free_remaining <= 3 && r.billing.credit_balance === 0) {
-      lines.push(`        ⚠️  Low on free tasks (${r.billing.free_remaining}/${r.billing.free_tasks_per_month}). Add credits at ${MANAGED_DASHBOARD_URL}`);
-    }
-  }
-
-  lines.push(`  ${sym(r.apiReachable)}  api.hanzilla.co ${r.apiReachable ? 'reachable' : 'NOT reachable (may not affect BYOM mode)'}`);
 
   if (r.recentSessions.length) {
     lines.push('');

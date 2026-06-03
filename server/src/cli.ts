@@ -24,7 +24,6 @@ import { dirname } from 'path';
 import { discoverBundledSkills, type SkillMeta } from './cli/skills-discovery.js';
 import { WebSocketClient } from './ipc/websocket-client.js';
 import { EXIT_OK, EXIT_TASK_ERROR, EXIT_CLI_ERROR, EXIT_TIMEOUT } from './cli/exit-codes.js';
-import { IS_MANAGED_MODE, MANAGED_API_URL } from './cli/managed-client.js';
 import { parseDuration } from './cli/arg-parser.js';
 import {
   writeSessionStatus,
@@ -221,62 +220,6 @@ async function cmdStart(): Promise<void> {
     context = context
       ? `${skillPrompt}\n\n---\n\nAdditional context: ${context}`
       : skillPrompt;
-  }
-
-  // Managed mode: route to api.hanzilla.co instead of local relay.
-  if (IS_MANAGED_MODE) {
-    if (detach && !quietMode) {
-      console.error('[CLI] --detach not yet supported in managed mode — running blocking');
-    }
-    if (!quietMode && !jsonOutput) {
-      console.error(`[CLI] Managed mode — dispatching to ${MANAGED_API_URL}`);
-    }
-    const { runManagedTask } = await import('./cli/managed-client.js');
-    let result;
-    try {
-      result = await runManagedTask(task, url, context, timeoutMs);
-    } catch (err: any) {
-      console.error(`[CLI] Managed API error: ${err.message}`);
-      process.exit(EXIT_CLI_ERROR);
-    }
-    const sid = `managed-${Date.now().toString(36).slice(-8)}`;
-    writeSessionStatus(sid, {
-      session_id: sid,
-      status: result.status === 'complete' ? 'complete' : result.status === 'timeout' ? 'running' : 'error',
-      task, url, context,
-      result: result.answer,
-      error: result.error,
-    });
-    if (jsonOutput) {
-      console.log(JSON.stringify({
-        type: 'task_complete',
-        session_id: sid,
-        status: result.status,
-        result: result.answer,
-        steps: result.steps,
-        error: result.error,
-      }));
-    } else {
-      if (!quietMode) console.error(`\n[CLI] Task ${result.status} after ${result.steps} steps`);
-      console.log(result.answer);
-    }
-    if (!quietMode && !jsonOutput && result.status === 'complete') {
-      try {
-        const { getBillingStatus, MANAGED_DASHBOARD_URL: dashUrl } = await import('./cli/managed-client.js');
-        const bal = await getBillingStatus();
-        if (bal) {
-          const total = bal.free_remaining + bal.credit_balance;
-          console.error(`  [managed] ${bal.free_remaining} free + ${bal.credit_balance} credits remaining (${total} tasks). Top up: ${dashUrl}`);
-          if (total <= 3) {
-            console.error(`  ⚠️  Low balance — add credits soon.`);
-          }
-        }
-      } catch { /* non-critical */ }
-    }
-    const code = result.status === 'complete' ? EXIT_OK
-      : result.status === 'timeout' ? EXIT_TIMEOUT
-      : EXIT_TASK_ERROR;
-    process.exit(code);
   }
 
   if (!jsonOutput && !quietMode) {
@@ -570,8 +513,7 @@ async function cmdDoctor(): Promise<void> {
     console.log(renderDoctorReport(report));
   }
   // Exit non-zero if anything critical is off
-  const billingOk = report.billing === null || report.billing.free_remaining + report.billing.credit_balance > 0;
-  const ok = report.relayReachable && report.credentials.length > 0 && billingOk;
+  const ok = report.relayReachable && report.credentials.length > 0;
   process.exit(ok ? EXIT_OK : EXIT_CLI_ERROR);
 }
 
@@ -581,8 +523,6 @@ async function cmdSetup(): Promise<void> {
   let yes = false;
   let all = false;
   let skills: string[] | undefined;
-  let managed = false;
-  let apiKey: string | undefined;
   for (let i = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--only' && args[i + 1]) only = args[++i];
@@ -592,11 +532,9 @@ async function cmdSetup(): Promise<void> {
       skills = args[++i].split(',').map(s => s.trim()).filter(Boolean);
     } else if (arg.startsWith('--skills=')) {
       skills = arg.slice('--skills='.length).split(',').map(s => s.trim()).filter(Boolean);
-    } else if (arg === '--managed') managed = true;
-    else if (arg === '--api-key' && args[i + 1]) apiKey = args[++i];
-    else if (arg.startsWith('--api-key=')) apiKey = arg.slice('--api-key='.length);
+    }
   }
-  await runSetup({ only, yes, all, skills, managed, apiKey });
+  await runSetup({ only, yes, all, skills });
 }
 
 function cmdVersion(): void {
@@ -649,8 +587,6 @@ Commands:
     --yes, -y               Non-interactive mode (installs core skill only)
     --all                   Install every bundled skill (skip the prompt)
     --skills a,b,c          Install just these skills (core always included)
-    --managed               Skip BYOM, configure managed mode
-    --api-key <key>         Use this HANZI_API_KEY (required with --managed in non-interactive)
 
   skills                    List available agent skills
   skills install <name>     Download a skill into your project
