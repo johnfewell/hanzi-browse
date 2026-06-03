@@ -43,7 +43,7 @@ import { showAgentIndicators, hideAgentIndicators, hideIndicatorsForToolUse, sho
 import { ensureTabGroup, addTabToGroup, validateTabInGroup, isTabManagedByAgent, registerTabCleanupListener, initTabManager } from './managers/tab-manager.js';
 import {
   initMcpBridge, sendMcpUpdate, sendMcpComplete, sendMcpError, sendMcpScreenshot, queryMemory, sendEscalation,
-  setManagedSession, clearManagedSession, getManagedSessionInfo, sendToMcpRelay, stopManagedTask,
+  sendToMcpRelay,
 } from './modules/mcp-bridge.js';
 import { checkAndIncrementUsage, activateLicense, getLicenseStatus, deactivateLicense } from './managers/license-manager.js';
 import { initErrorReporting, captureError } from './modules/error-reporter.js';
@@ -976,34 +976,6 @@ ${mcpSession.context}</system-reminder>`,
  * @param {number|null} [tabGroupId] - Optional tab group ID from client (UI manages this)
  * @returns {Promise<Object>} Task result with {success: boolean, message: string}
  */
-/**
- * Start a task in managed mode — sends task to the managed backend via relay.
- * The backend runs the agent loop server-side and sends progress updates back
- * through the relay, which are forwarded to the sidepanel by mcp-bridge.js.
- */
-function startManagedTask(task, browserSessionId) {
-  const requestId = crypto.randomUUID();
-
-  // Track that we're running a managed task
-  uiSessionState.currentTask = { task, managed: true, requestId };
-
-  const sent = sendToMcpRelay({
-    type: 'create_task',
-    task,
-    browserSessionId,
-    requestId,
-  });
-
-  if (!sent) {
-    // Relay not connected
-    chrome.runtime.sendMessage({
-      type: 'TASK_ERROR',
-      error: 'Not connected to managed service. Check your connection.',
-    }).catch(() => {});
-    uiSessionState.currentTask = null;
-  }
-}
-
 async function startTask(tabId, task, shouldAskBeforeActing = true, images = [], tabGroupId = null) {
   // Reset state for new task (but preserve conversation history)
   // NOTE: tabGroupId is now passed from client, not stored globally
@@ -1136,24 +1108,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ success: false, error: usage.message });
           return;
         }
-        // Check if extension is in managed mode
-        const managedInfo = await getManagedSessionInfo();
-        if (managedInfo.isManaged && managedInfo.browserSessionId) {
-          // Managed mode: submit task via relay
-          startManagedTask(payload.task, managedInfo.browserSessionId);
-          sendResponse({ success: true });
-        } else {
-          // BYOM mode: run local agent loop
-          startTask(
-            payload.tabId,
-            payload.task,
-            payload.askBeforeActing !== false,
-            payload.images || [],
-            payload.tabGroupId || null
-          )
-            .then(result => sendResponse({ success: true, result }))
-            .catch(error => sendResponse({ success: false, error: error.message }));
-        }
+        // BYOM mode: run local agent loop
+        startTask(
+          payload.tabId,
+          payload.task,
+          payload.askBeforeActing !== false,
+          payload.images || [],
+          payload.tabGroupId || null
+        )
+          .then(result => sendResponse({ success: true, result }))
+          .catch(error => sendResponse({ success: false, error: error.message }));
       });
       return true;
 
@@ -1195,70 +1159,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       deactivateLicense().then(result => sendResponse(result));
       return true;
 
-    case 'MANAGED_SET_SESSION': {
-      // Page already called register API — just store the session credentials
-      const { session_token, browser_session_id, relay_url } = payload;
-      if (session_token) {
-        setManagedSession(session_token, browser_session_id, relay_url);
-        sendResponse({ success: true });
-      } else {
-        sendResponse({ success: false, error: 'No session token' });
-      }
-      return false;
-    }
-
-    case 'MANAGED_PAIR': {
-      // Exchange a pairing token for a managed session (legacy: used by embed widget)
-      // Deduplicate: multiple content scripts can relay the same token
-      const { pairing_token, api_url } = payload;
-      if (!pairing_token) { sendResponse({ success: false, error: 'No token' }); return false; }
-      if (globalThis._pairingInFlight === pairing_token) {
-        // Already processing this exact token — wait for the first attempt's result
-        sendResponse({ success: false, error: 'Pairing already in progress' });
-        return false;
-      }
-      globalThis._pairingInFlight = pairing_token;
-      const baseUrl = api_url || 'http://localhost:3456';
-      (async () => {
-        try {
-          const res = await fetch(`${baseUrl}/v1/browser-sessions/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pairing_token }),
-          });
-          const data = await res.json();
-
-          if (data.session_token) {
-            // Use relay_port from server if provided (handles port fallback)
-            const pairUrl = data.relay_port ? (() => {
-              const u = new URL(baseUrl);
-              u.port = String(data.relay_port);
-              return u.origin;
-            })() : baseUrl;
-            setManagedSession(data.session_token, data.browser_session_id, pairUrl);
-            sendResponse({ success: true, browserSessionId: data.browser_session_id });
-          } else {
-            sendResponse({ success: false, error: data.error || 'Pairing failed' });
-          }
-        } catch (err) {
-          captureError(err, { source: 'managed_pair' });
-          sendResponse({ success: false, error: err.message });
-        } finally {
-          globalThis._pairingInFlight = null;
-        }
-      })();
-      return true;
-    }
-
-    case 'MANAGED_DISCONNECT':
-      clearManagedSession();
-      sendResponse({ success: true });
-      return false;
-
-    case 'GET_MANAGED_STATUS':
-      getManagedSessionInfo().then(info => sendResponse(info));
-      return true; // async
-
     case 'CLEAR_CONVERSATION':
       // Reset state for new conversation
       uiSessionState.currentTask = null;
@@ -1275,8 +1175,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       uiSessionState.cancelled = true;
       // Abort any ongoing API call (sidepanel agent)
       abortRequest();
-      // Stop managed tasks (reject further tool executions)
-      stopManagedTask();
       // Also resolve any pending plan approval
       resolvePendingPlan('ui-task', { approved: false });
       sendResponse({ success: true });

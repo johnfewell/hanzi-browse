@@ -11,23 +11,8 @@ import { EmptyState } from './components/EmptyState';
 export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [suggestedText, setSuggestedText] = useState('');
-  const [isManaged, setIsManaged] = useState(false);
   const config = useConfig();
   const chat = useChat();
-
-  // Check managed mode
-  useEffect(() => {
-    chrome.runtime.sendMessage({ type: 'GET_MANAGED_STATUS' }, (res) => {
-      if (res?.isManaged) setIsManaged(true);
-    });
-    const listener = (changes) => {
-      if (changes.managed_session_token) {
-        setIsManaged(!!changes.managed_session_token.newValue);
-      }
-    };
-    chrome.storage.onChanged.addListener(listener);
-    return () => chrome.storage.onChanged.removeListener(listener);
-  }, []);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -55,9 +40,8 @@ export function App() {
     );
   }
 
-  // Real readiness check: if no models AND not managed, show setup prompt.
-  // Managed users don't need local models. CLI users skip this entirely.
-  if (config.availableModels.length === 0 && !isManaged) {
+  // Real readiness check: if no models, show setup prompt.
+  if (config.availableModels.length === 0) {
     return (
       <div class="app">
         <div class="empty-state">
@@ -94,8 +78,8 @@ export function App() {
   return (
     <div class="app">
       <Header
-        currentModel={isManaged ? { name: 'Hanzi Managed' } : config.currentModel}
-        availableModels={isManaged ? [] : config.availableModels}
+        currentModel={config.currentModel}
+        availableModels={config.availableModels}
         currentModelIndex={config.currentModelIndex}
         onModelSelect={config.selectModel}
         onNewChat={chat.clearChat}
@@ -120,7 +104,7 @@ export function App() {
         onStop={chat.stopTask}
         onAddImage={chat.addImage}
         onRemoveImage={chat.removeImage}
-        hasModels={config.availableModels.length > 0 || isManaged}
+        hasModels={config.availableModels.length > 0}
         suggestedText={suggestedText}
         onClearSuggestion={() => setSuggestedText('')}
         onOpenSettings={() => setIsSettingsOpen(true)}

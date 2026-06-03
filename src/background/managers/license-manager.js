@@ -2,7 +2,6 @@
  * License Manager (Extension)
  *
  * BYOM mode is free and unlimited — no license enforcement.
- * Managed mode billing is handled server-side via the credit system.
  *
  * Kept for backwards compatibility (service-worker.js imports it).
  */
@@ -22,7 +21,7 @@ export async function getLicenseStatus() {
 }
 
 export async function activateLicense(_key) {
-  return { success: true, message: 'License system removed. BYOM is free, managed uses credits.' };
+  return { success: true, message: 'License system removed. BYOM is free.' };
 }
 
 export async function deactivateLicense() {
