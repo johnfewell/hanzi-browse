@@ -217,6 +217,39 @@ export const TOOL_DEFINITIONS = [
   },
 
   {
+    name: 'collect_page_text',
+    description: `Gather a long or virtualized list (chat history, feed, search results, comments) in ONE call. It scrolls the page internally, reads the rendered text at each step, de-duplicates rows across virtualized re-renders, and returns the collected text — so you do NOT loop scroll+read yourself. Strongly prefer this over repeated computer scroll + get_page_text/read_page when you need many items from a long list. Returns text only (no screenshot). For the newest N messages of a chat, use direction "up" with count N. The result reports reachedBoundary (true = hit the list end) and truncated (true = hit the scroll limit, call again to continue). tabId is optional — if omitted, the active tab in your window is used automatically.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        direction: {
+          type: 'string',
+          enum: ['up', 'down'],
+          description: 'Scroll direction. "down" (default) reads top→bottom; "up" starts at the bottom and reads newest→older — use for the newest messages of a chat.',
+        },
+        count: {
+          type: 'number',
+          description: 'Target number of items to collect (e.g. the newest 100). Stops once reached. Omit to gather as much as possible within maxScrolls.',
+        },
+        maxScrolls: {
+          type: 'number',
+          description: 'Safety bound on scroll iterations (default 20, max 50). If hit before the list end, truncated is true and you can call again.',
+        },
+        startPosition: {
+          type: 'string',
+          enum: ['top', 'bottom', 'current'],
+          description: 'Where to start. Defaults to "top" for direction "down" and "bottom" for direction "up".',
+        },
+        tabId: {
+          type: 'number',
+          description: 'Tab ID to collect from. Optional — if omitted, uses the active tab in your window.',
+        },
+      },
+      required: [],
+    },
+  },
+
+  {
     type: 'custom',
     name: 'update_plan',
     description: 'Update the plan and present it to the user for approval before proceeding.',

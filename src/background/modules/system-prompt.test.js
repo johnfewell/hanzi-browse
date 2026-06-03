@@ -38,6 +38,15 @@ describe('buildSystemPrompt — vision de-biasing (REQ-008)', () => {
     expect(text).toContain('read_page');
   });
 
+  it('routes long/virtualized lists to collect_page_text (REQ-007 / PAT-001)', () => {
+    // The whole point of the collector is to replace manual scroll+read loops on
+    // long lists; the prompt must actively steer the agent to it.
+    const text = promptText();
+
+    expect(text).toContain('collect_page_text');
+    expect(text).toMatch(/newest N items of a chat.*direction "up"/s);
+  });
+
   it('emits the directives for non-Claude models too', () => {
     // The behavior block is model-agnostic; only the identity marker is gated.
     const text = promptText({ isClaudeModel: false });

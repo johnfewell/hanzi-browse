@@ -13,6 +13,7 @@ import {
   handleGetPageText,
   handleJavaScriptTool as handleJavascriptTool,
 } from './utility-core.js';
+import { handleCollectPageText } from './collect-text-core.js';
 
 // Our implementations (tabs, monitoring, agent tools)
 import { handleFileUpload } from './form-tool.js';
@@ -50,6 +51,7 @@ export const toolHandlers = {
   tabs_create: handleTabsCreate,
   tabs_close: handleTabsClose,
   get_page_text: handleGetPageText,
+  collect_page_text: handleCollectPageText,
   javascript_tool: handleJavascriptTool,
   view_screenshot: handleViewScreenshot,
   read_console_messages: handleReadConsoleMessages,
