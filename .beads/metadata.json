@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "hanzi_browse",
+  "project_id": "ec7b2211-ed72-4fc3-9ee5-cbe611c398ef"
+}
