@@ -13,7 +13,7 @@ import { homedir, platform } from 'os';
 import { execSync } from 'child_process';
 import { createInterface } from 'readline';
 import { randomUUID } from 'crypto';
-import { isRelayRunning } from '../relay/auto-start.js';
+import { isRelayRunning, ensureRelayRunning } from '../relay/auto-start.js';
 import { WebSocketClient } from '../ipc/websocket-client.js';
 import {
   detectCredentialSources as detectSources,
@@ -491,8 +491,9 @@ function openInBrowser(browser: BrowserInfo, url: string): void {
 }
 
 async function ensureExtension(isInteractive: boolean): Promise<boolean> {
-  // Already connected?
-  if (await isRelayRunning()) return true;
+  // Already connected? (starts the relay so the extension can connect, then
+  // verifies the extension actually registered — not just that the port is open)
+  if (await isExtensionConnected()) return true;
 
   // Detect browsers
   const browsers = detectBrowsers();
@@ -538,7 +539,7 @@ async function ensureExtension(isInteractive: boolean): Promise<boolean> {
   const sp = spinner('Waiting for extension to connect...', isInteractive);
   for (let i = 0; i < 90; i++) { // 3 minutes max
     await sleep(2000);
-    if (await isRelayRunning()) {
+    if (await isExtensionConnected()) {
       sp.stop(`${c.green('✓')}  Extension ${c.green('connected')}`);
       return true;
     }
@@ -596,6 +597,36 @@ async function sendToExtension(type: string, payload: any): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Check whether a Chrome extension has actually registered with the relay.
+ *
+ * The extension is a WebSocket *client* — it cannot open the relay port itself,
+ * so we start the relay first (giving the extension something to connect to),
+ * then ask the relay whether an `extension` role is registered. This is the
+ * real signal: isRelayRunning() only proves the port is open, not that the
+ * extension is connected.
+ */
+async function isExtensionConnected(): Promise<boolean> {
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    await ensureRelayRunning();
+  } catch {
+    return false;
+  } finally {
+    console.error = origError;
+  }
+  if (!relay?.isConnected() && !(await connectRelay())) return false;
+  const requestId = randomUUID().slice(0, 8);
+  try {
+    await relay!.send({ type: 'status_query', requestId });
+  } catch {
+    return false;
+  }
+  const res = await waitForRelayResponse('status_response', requestId, 2000);
+  return !!res?.extensionConnected;
 }
 
 // ── Credential setup ──────────────────────────────────────────────────
@@ -1097,11 +1128,11 @@ export async function runSetup(options: { only?: string; yes?: boolean; all?: bo
   const sp0 = spinner('Looking for the extension...', interactive);
   if (interactive) await sleep(400);
 
-  const relayUp = await isRelayRunning();
-  if (relayUp) {
-    sp0.stop(`${c.green('✓')}  Chrome extension is running`);
+  const extConnected = await isExtensionConnected();
+  if (extConnected) {
+    sp0.stop(`${c.green('✓')}  Chrome extension connected`);
   } else {
-    sp0.stop(`${c.dim('○')}  Chrome extension not found`);
+    sp0.stop(`${c.dim('○')}  Chrome extension not connected`);
     if (interactive) {
       console.log('');
       await ensureExtension(interactive);
