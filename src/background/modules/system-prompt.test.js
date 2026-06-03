@@ -46,3 +46,37 @@ describe('buildSystemPrompt — vision de-biasing (REQ-008)', () => {
     expect(text).toContain('Reserve screenshots for explicit visual inspection');
   });
 });
+
+describe('buildSystemPrompt — turn density (REQ-003 / REQ-006)', () => {
+  // Phase 2 cuts the number and cost of turns. These directives are what make
+  // the agent stop narrating every step and start batching known work; if they
+  // regress, turn count climbs back up and a test must catch it.
+
+  it('limits per-turn narration to keep tool turns cheap (REQ-003)', () => {
+    const text = promptText();
+
+    // The 120-char ceiling on action-turn narration is the concrete, testable
+    // form of AC-008. Loosening it (or dropping the directive) is a regression.
+    expect(text).toContain('Do NOT narrate every step');
+    expect(text).toContain('under 120 characters');
+  });
+
+  it('instructs batching independent actions into one turn (REQ-006)', () => {
+    const text = promptText();
+
+    expect(text).toContain('Batch independent actions into one turn');
+    // AC-009: a known multi-field form should batch form_input calls, then
+    // verify once — not read after every field.
+    expect(text).toMatch(/several "form_input" calls.*SINGLE response|form_input.*at once/s);
+    expect(text).toMatch(/do not read after each field/i);
+  });
+
+  it('forbids batching content composition with its submission (safety)', () => {
+    const text = promptText();
+
+    // Compose and Send must stay separate turns so we never fire off
+    // half-written content. This guard must not be weakened.
+    expect(text).toContain('NEVER batch content composition with its submission');
+    expect(text).toMatch(/compose, verify the text landed, then send/i);
+  });
+});

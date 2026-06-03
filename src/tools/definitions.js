@@ -51,7 +51,7 @@ export const TOOL_DEFINITIONS = [
 
   {
     name: 'form_input',
-    description: `Set values in ANY form element — text inputs, textareas, native <select> dropdowns, custom React/Workday/MUI dropdown comboboxes, checkboxes, radio buttons, date pickers, and number inputs. For dropdowns (both native and custom), just pass the desired option text as the value — the tool automatically opens the dropdown, searches, and selects the match. This is the FASTEST way to fill any form field (1 tool call vs 5-10 with computer clicks). ALWAYS prefer form_input over computer clicks for form fields. tabId is optional — if omitted, the active tab in your window is used automatically.`,
+    description: `Set values in ANY form element — text inputs, textareas, native <select> dropdowns, custom React/Workday/MUI dropdown comboboxes, checkboxes, radio buttons, date pickers, and number inputs. For dropdowns (both native and custom), just pass the desired option text as the value — the tool automatically opens the dropdown, searches, and selects the match. This is the FASTEST way to fill any form field (1 tool call vs 5-10 with computer clicks). ALWAYS prefer form_input over computer clicks for form fields. When filling a known multi-field form, issue several form_input calls in the SAME turn, then verify once with read_page — don't read after each field. tabId is optional — if omitted, the active tab in your window is used automatically.`,
     input_schema: {
       type: 'object',
       properties: {
