@@ -2,7 +2,7 @@
  * Credential source detection for CLI setup + doctor.
  *
  * Covers env vars (static API keys), file-based OAuth (Claude Code, Codex),
- * Keychain (Claude Code on macOS), and service account files (Vertex AI).
+ * and Keychain (Claude Code on macOS).
  *
  * Priority ordering (first = most preferred): managed > static env > OAuth file > Keychain > Codex.
  */
@@ -12,7 +12,7 @@ import { join } from 'path';
 export type CredentialSlug =
   | 'claude' | 'codex'
   | 'anthropic-env' | 'openai-env' | 'google-env' | 'openrouter-env'
-  | 'vertex-sa' | 'hanzi-managed';
+  | 'hanzi-managed';
 
 export interface CredentialSource {
   name: string;
@@ -57,11 +57,6 @@ export function detectCredentialSources(opts: DetectOptions): CredentialSource[]
   }
   if (env.OPENROUTER_API_KEY) {
     found.push({ name: 'OpenRouter API key', slug: 'openrouter-env', path: 'OPENROUTER_API_KEY env var' });
-  }
-
-  // Vertex service account
-  if (env.VERTEX_SA_PATH && fileExists(env.VERTEX_SA_PATH)) {
-    found.push({ name: 'Vertex AI service account', slug: 'vertex-sa', path: env.VERTEX_SA_PATH });
   }
 
   // Claude Code (file, then Keychain on macOS)

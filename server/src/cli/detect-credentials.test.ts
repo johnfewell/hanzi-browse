@@ -26,14 +26,6 @@ describe('detectCredentialSources (expanded)', () => {
     expect(found.some(s => s.slug === 'hanzi-managed')).toBe(true);
   });
 
-  it('detects VERTEX_SA_PATH when file exists', () => {
-    const found = detectCredentialSources(make({
-      env: { VERTEX_SA_PATH: '/tmp/sa.json' },
-      fileExists: (p: string) => p === '/tmp/sa.json',
-    }));
-    expect(found.some(s => s.slug === 'vertex-sa')).toBe(true);
-  });
-
   it('still detects Claude Code and Codex', () => {
     const found = detectCredentialSources(make({
       fileExists: (p: string) => p === '/home/u/.claude/.credentials.json' || p === '/home/u/.codex/auth.json',

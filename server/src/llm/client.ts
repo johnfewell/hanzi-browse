@@ -1,12 +1,8 @@
 /**
  * LLM Client for MCP Server
  *
- * Routes between providers:
- * - Vertex AI (Gemini) — managed mode, server-side agent loop
- * - Anthropic — legacy local mode, Claude Code OAuth
- *
+ * Anthropic provider — local BYOM mode, Claude Code OAuth.
  * Canonical internal format is Anthropic content blocks.
- * Vertex provider converts at the API boundary.
  */
 
 import {
@@ -16,7 +12,6 @@ import {
   type CredentialSource,
   type ClaudeCredentials,
 } from "./credentials.js";
-import { callVertexLLM, isVertexConfigured } from "./vertex.js";
 
 export interface ContentBlockText {
   type: "text";
@@ -249,16 +244,11 @@ async function parseSSEStream(
 }
 
 /**
- * Call the LLM. Routes to Vertex AI (Gemini) if configured, otherwise Anthropic.
+ * Call the LLM (Anthropic).
  *
  * Handles streaming, auto-refresh on 401, and credential resolution.
  */
 export async function callLLM(params: CallLLMParams): Promise<LLMResponse> {
-  // Route to Vertex AI if configured
-  if (isVertexConfigured()) {
-    return callVertexLLM(params);
-  }
-
   const {
     messages,
     system,
