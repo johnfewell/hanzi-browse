@@ -3,6 +3,9 @@ import { WebSocket } from 'ws';
 import { getClaudeCredentials, getClaudeKeychainCredentials, getCodexCredentials, refreshClaudeToken, saveClaudeCredentials, } from '../llm/credentials.js';
 const PROXY_TIMEOUT_MS = 150000;
 const EXPIRY_BUFFER_MS = 60 * 1000;
+// Fast tier — used as an automatic fallback when the selected model is
+// rate-limited (429). Separate rate-limit bucket from Sonnet/Opus.
+const FAST_MODEL = 'claude-haiku-4-5-20251001';
 function defaultLogger(message) {
     console.error(`[Relay] ${message}`);
 }
@@ -123,6 +126,20 @@ export async function handleApiProxy(ws, msg, log = defaultLogger) {
                 creds = refreshed;
                 headers.Authorization = `Bearer ${creds.accessToken}`;
                 response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+            }
+            if (response.status === 429) {
+                // The selected model is rate-limited. Retry once on the fast tier
+                // (Haiku) — a separate rate-limit bucket — so the agent gets a real
+                // streamed answer instead of a 429 it can't recover from.
+                try {
+                    const parsed = JSON.parse(body);
+                    if (parsed && parsed.model && parsed.model !== FAST_MODEL) {
+                        log(`Model ${parsed.model} rate-limited (429); retrying on ${FAST_MODEL}`);
+                        parsed.model = FAST_MODEL;
+                        response = await fetch(url, { method: 'POST', headers, body: JSON.stringify(parsed), signal: controller.signal });
+                    }
+                }
+                catch { /* body not JSON — leave response as-is */ }
             }
             if (!response.ok) {
                 const errorText = await response.text().catch(() => '');

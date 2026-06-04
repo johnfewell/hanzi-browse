@@ -240,8 +240,8 @@ export function isClaudeProvider() {
  */
 const MODEL_TIER_MAP = {
   fast: 'claude-haiku-4-5-20251001',      // Quick, cheap - good for browser execution
-  smart: 'claude-sonnet-4-20250514',      // Balanced - good for planning, analysis
-  powerful: 'claude-opus-4-5-20251101',   // Best quality - good for complex reasoning
+  smart: 'claude-sonnet-4-6',             // Balanced - good for planning, analysis
+  powerful: 'claude-opus-4-8',            // Best quality - good for complex reasoning
 };
 
 /**
@@ -1168,6 +1168,15 @@ export async function callLLM(messages, onTextChunk = null, log = () => {}, curr
     try {
       return await callLLMThroughRelayProxy(messages, onTextChunk, log, currentUrl, effectiveConfig);
     } catch (relayErr) {
+      // A rate-limit (429) is a real answer from the API, not a relay failure.
+      // Don't fall back to the native host — it re-issues the same call and hangs.
+      // Retry once on the fast tier (Haiku), which is a separate rate-limit bucket.
+      if (/\b429\b|rate[_ ]?limit|usage[_ ]?limit/i.test(relayErr.message || '')
+          && effectiveConfig.model !== MODEL_TIER_MAP.fast) {
+        console.log('[API] Model rate-limited; retrying on fast tier (Haiku):', relayErr.message);
+        const fastConfig = { ...effectiveConfig, model: MODEL_TIER_MAP.fast };
+        return await callLLMThroughRelayProxy(messages, onTextChunk, log, currentUrl, fastConfig);
+      }
       console.log('[API] Relay proxy failed, trying native host:', relayErr.message);
       return await callLLMThroughProxy(messages, onTextChunk, log, currentUrl, effectiveConfig);
     }
