@@ -30,7 +30,7 @@ export function OnboardingApp() {
       ]);
 
       const sources = [];
-      if (oauth?.isOAuthEnabled && oauth?.isAuthenticated) sources.push('Claude Code');
+      if (oauth?.isAuthenticated) sources.push('Claude Code');
       if (codex?.isAuthenticated) sources.push('Codex');
       for (const [id, key] of Object.entries(config?.providerKeys || {})) {
         if (key) sources.push(PROVIDERS[id]?.name || id);

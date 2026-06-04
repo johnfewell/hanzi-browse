@@ -3,10 +3,10 @@ export const PROVIDERS = {
   anthropic: {
     name: 'Anthropic',
     baseUrl: 'https://api.anthropic.com/v1/messages',
+    // Fallback list (used when the live /v1/models fetch fails). Keep current.
     models: [
-      { id: 'claude-opus-4-5-20251101', name: 'Opus 4.5' },
-      { id: 'claude-opus-4-20250514', name: 'Opus 4' },
-      { id: 'claude-sonnet-4-20250514', name: 'Sonnet 4' },
+      { id: 'claude-opus-4-8', name: 'Opus 4.8' },
+      { id: 'claude-sonnet-4-6', name: 'Sonnet 4.6' },
       { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5' },
     ],
   },

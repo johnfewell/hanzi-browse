@@ -24,12 +24,16 @@ let sessionStats = {
 // Per-task usage (reset per task)
 let currentTaskUsage = new Map();
 
-// Pricing per 1M tokens (USD) - Jan 2025 rates
+// Pricing per 1M tokens (USD) — standard per-tier rates
 const PRICING = {
-  // Claude 4 family
-  'claude-opus-4-5-20250514': { input: 15, output: 75 },
+  // Claude 4 family (current)
+  'claude-opus-4-8': { input: 15, output: 75 },
+  'claude-sonnet-4-6': { input: 3, output: 15 },
+  'claude-haiku-4-5-20251001': { input: 1, output: 5 },
+  // Older Claude 4
+  'claude-opus-4-5-20251101': { input: 15, output: 75 },
+  'claude-sonnet-4-5-20250929': { input: 3, output: 15 },
   'claude-sonnet-4-20250514': { input: 3, output: 15 },
-  'claude-haiku-4-20250414': { input: 1, output: 5 },
   // Legacy models
   'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
   'claude-3-5-haiku-20241022': { input: 1, output: 5 },

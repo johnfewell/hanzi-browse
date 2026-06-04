@@ -72,7 +72,7 @@ describe('useConfig', () => {
         currentModelIndex: 1,
         agentDefaultConfig: {
           provider: 'anthropic',
-          model: 'claude-opus-4-20250514',
+          model: 'claude-opus-4-8',
           apiBaseUrl: 'https://api.anthropic.com/v1/messages',
           authMethod: 'api_key',
         },
@@ -120,6 +120,26 @@ describe('useConfig', () => {
     ]);
 
     expect(api.currentModelIndex).toBe(1);
+  });
+
+  it('shows Claude Code models even when another provider is the active auth method', async () => {
+    // Regression: Claude Code creds present (isAuthenticated) but Codex is the
+    // active method (isOAuthEnabled false). Claude must still be selectable.
+    mockConfigMessages({
+      config: { providerKeys: {} },
+      oauth: { isOAuthEnabled: false, isAuthenticated: true },
+      codex: { isAuthenticated: true },
+    });
+
+    render(<ConfigHarness onReady={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('loading').textContent).toBe('false');
+    });
+
+    const availableModels = JSON.parse(screen.getByTestId('available-models').textContent);
+    expect(availableModels.some((m) => m.provider === 'anthropic' && m.authMethod === 'oauth')).toBe(true);
+    expect(availableModels.some((m) => m.provider === 'codex' && m.authMethod === 'codex_oauth')).toBe(true);
   });
 
   it('selects a model, clears chat, and persists the selected model payload', async () => {

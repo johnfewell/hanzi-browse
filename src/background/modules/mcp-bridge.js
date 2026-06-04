@@ -374,7 +374,7 @@ async function handleMcpCommand(command) {
           await chrome.storage.local.set({
             provider: 'anthropic',
             apiBaseUrl: 'https://api.anthropic.com/v1/messages',
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-6',
             authMethod: 'oauth',
           });
         } else if (source === 'codex') {
@@ -606,8 +606,8 @@ export function sendEscalation(sessionId, problem, whatITried, whatINeed, timeou
 // Model tier → Anthropic model ID mapping for ccproxy
 const CCPROXY_MODEL_MAP = {
   fast: 'claude-haiku-4-5-20251001',
-  smart: 'claude-sonnet-4-5-20250929',
-  powerful: 'claude-opus-4-5-20251101',
+  smart: 'claude-sonnet-4-6',
+  powerful: 'claude-opus-4-8',
 };
 
 const CCPROXY_URL = 'http://127.0.0.1:8000/claude/v1/messages';

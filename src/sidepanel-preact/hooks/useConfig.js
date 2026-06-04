@@ -88,7 +88,9 @@ export function useConfig() {
 
   const buildAvailableModels = useCallback(async (keys, custom, oauth, codex) => {
     const models = [];
-    const hasOAuth = oauth?.isOAuthEnabled && oauth?.isAuthenticated;
+    // Claude Code is available whenever its OAuth creds exist — independent of
+    // which provider is currently active (symmetric with Codex below).
+    const hasOAuth = oauth?.isAuthenticated;
     const hasCodexOAuth = codex?.isAuthenticated;
 
     // Add Codex Plan models if connected

@@ -14,7 +14,7 @@ import { proxyApiCall, isRelayConnected } from './relay-client.js';
 let config = {
   apiBaseUrl: 'http://127.0.0.1:8000/claude/v1/messages',
   apiKey: null,
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-6',
   provider: 'anthropic',
   maxTokens: 10000,
   maxSteps: 0,
