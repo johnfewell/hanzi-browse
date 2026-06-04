@@ -6,6 +6,13 @@ const EXPIRY_BUFFER_MS = 60 * 1000;
 // Fast tier — used as an automatic fallback when the selected model is
 // rate-limited (429). Separate rate-limit bucket from Sonnet/Opus.
 const FAST_MODEL = 'claude-haiku-4-5-20251001';
+// Sockets with an in-flight proxy call. The relay uses this to avoid tearing
+// down an extension socket mid-call (the MV3 reconnect loop replaces sockets
+// every ~5s; killing one mid-stream loses the answer the model already gave).
+const pendingProxyCount = new Map();
+export function hasPendingProxy(ws) {
+    return (pendingProxyCount.get(ws) || 0) > 0;
+}
 function defaultLogger(message) {
     console.error(`[Relay ${new Date().toISOString()}] ${message}`);
 }
@@ -105,6 +112,7 @@ export async function handleApiProxy(ws, msg, log = defaultLogger) {
     }
     catch { /* ignore */ }
     log(`proxy START rid=${requestId} model=${reqModel} bodyLen=${(body || '').length} wsOpen=${ws.readyState === WebSocket.OPEN}`);
+    pendingProxyCount.set(ws, (pendingProxyCount.get(ws) || 0) + 1);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
     try {
@@ -195,5 +203,10 @@ export async function handleApiProxy(ws, msg, log = defaultLogger) {
     }
     finally {
         clearTimeout(timeoutId);
+        const n = (pendingProxyCount.get(ws) || 1) - 1;
+        if (n <= 0)
+            pendingProxyCount.delete(ws);
+        else
+            pendingProxyCount.set(ws, n);
     }
 }

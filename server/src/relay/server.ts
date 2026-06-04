@@ -23,7 +23,7 @@ import {
   getClaudeKeychainCredentials,
   getCodexCredentials,
 } from '../llm/credentials.js';
-import { handleApiProxy } from './api-proxy.js';
+import { handleApiProxy, hasPendingProxy } from './api-proxy.js';
 
 const DEFAULT_PORT = 7862;
 const port = parseInt(process.env.WS_RELAY_PORT || String(DEFAULT_PORT), 10);
@@ -47,7 +47,7 @@ const QUEUE_MAX_AGE_MS = 60000; // Drop queued messages older than 60s
 const queueTimestamps: number[] = [];
 
 function log(msg: string): void {
-  console.error(`[Relay] ${msg}`);
+  console.error(`[Relay ${new Date().toISOString()}] ${msg}`);
 }
 
 function getClientsByRole(role: ClientRole): RelayClient[] {
@@ -161,13 +161,24 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      // If a new extension registers, disconnect old one
+      // If a new extension registers, disconnect old one — UNLESS the old
+      // socket still has an in-flight proxy call. The MV3 service worker churns
+      // through sockets every ~5s; killing one mid-call drops the streamed
+      // answer the model already produced and the agent's call never resolves.
+      // Hand routing to the new socket but keep the old one alive long enough
+      // to deliver its pending response, then close it.
       if (role === 'extension') {
         const existing = getExtension();
         if (existing && existing.ws !== ws) {
-          log('New extension connecting, closing old one');
-          existing.ws.close(1000, 'replaced');
           clients.delete(existing.ws);
+          if (hasPendingProxy(existing.ws)) {
+            log('New extension connecting; old has in-flight proxy — deferring its close to deliver the response');
+            const old = existing.ws;
+            setTimeout(() => { try { old.close(1000, 'replaced'); } catch { /* already gone */ } }, 30000);
+          } else {
+            log('New extension connecting, closing old one');
+            existing.ws.close(1000, 'replaced');
+          }
         }
       }
 
