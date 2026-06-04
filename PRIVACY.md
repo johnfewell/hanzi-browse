@@ -1,54 +1,36 @@
-# Privacy Policy for Hanzi
+# Privacy Policy for Hanzi Browse
 
-Last updated: March 18, 2026
+Last updated: June 3, 2026
 
 ## Overview
 
-Hanzi is a browser execution platform for AI agents. It operates in multiple modes with different data handling characteristics. This policy explains what data is processed in each mode.
+Hanzi Browse is a browser execution platform for AI agents. It is BYOM (bring your own model) and runs entirely on your machine — there is no hosted backend. This policy explains what data is processed.
 
-## BYOM Local Mode
+## Local BYOM operation
 
-When you use Hanzi locally with your own model provider (BYOM Local):
+Hanzi Browse drives your own Chrome with your own model credentials:
 
-- **No data is sent to Hanzi servers.** All processing happens on your machine.
+- **No data is sent to Hanzi Browse servers.** There is no hosted backend; all processing happens on your machine.
 - Screenshots and page content are sent only to your chosen AI provider (Anthropic, OpenAI, Google, etc.) according to their privacy policies.
-- API keys and credentials are stored locally in Chrome's secure storage.
+- API keys and credentials are stored locally in Chrome's secure storage (or read from your existing Claude Code / Codex login).
 - Conversation history is stored locally and can be cleared at any time.
 
-## Managed Mode
+## What Hanzi Browse Does Not Do
 
-When you use Hanzi's managed service (sign in at api.hanzilla.co):
+Hanzi Browse:
 
-- **Task data is processed on Hanzi servers.** This includes task descriptions, page content, screenshots, and tool execution results.
-- Hanzi routes AI inference through its own model provider (currently Google Vertex AI). Your data is processed according to [Google Cloud's data processing terms](https://cloud.google.com/terms/data-processing-terms).
-- Task records, usage data, and session metadata are stored in Hanzi's database (hosted on Neon Postgres in AWS US East).
-- Browser session tokens are stored as hashed values. API keys are stored as hashed values.
-- You can request deletion of your data by contacting us.
-
-## API / SDK Mode
-
-When a developer integrates Hanzi via the API/SDK:
-
-- The same data handling as Managed Mode applies.
-- Task execution data is attributed to the developer's workspace for usage tracking.
-- The developer is responsible for informing their end users about Hanzi's role in data processing.
-
-## What Hanzi Does Not Do
-
-Across all modes, Hanzi:
-
+- Does NOT send your task data to any Hanzi-operated server
 - Does NOT sell or share user data with third parties for advertising
 - Does NOT track browsing history outside of active task execution
-- Does NOT retain screenshots or page content beyond the task session (managed mode stores task answers and usage metrics, not raw page content)
+- Does NOT retain screenshots or page content beyond the task session
 
 ## Third-Party Services
 
-Depending on your mode, data may be processed by:
+Page content and screenshots are sent only to the AI provider whose key you supply, for example:
 
-- **Google Vertex AI** (managed mode): [Google Cloud Privacy](https://cloud.google.com/terms/data-processing-terms)
-- **Anthropic** (BYOM local): [Anthropic Privacy](https://www.anthropic.com/privacy)
-- **OpenAI** (BYOM local): [OpenAI Privacy](https://openai.com/privacy)
-- **Neon** (managed mode database): [Neon Privacy](https://neon.tech/privacy)
+- **Anthropic**: [Anthropic Privacy](https://www.anthropic.com/privacy)
+- **OpenAI**: [OpenAI Privacy](https://openai.com/privacy)
+- **Google**: [Google Cloud Privacy](https://cloud.google.com/terms/data-processing-terms)
 
 ## Extension Permissions
 

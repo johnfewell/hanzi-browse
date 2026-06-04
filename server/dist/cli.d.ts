@@ -13,4 +13,4 @@
  *   hanzi-browser stop <session_id> [--remove]
  *   hanzi-browser screenshot <session_id>
  */
-export {};
+export declare function main(): Promise<void>;

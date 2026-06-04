@@ -13,20 +13,25 @@
  *   hanzi-browser stop <session_id> [--remove]
  *   hanzi-browser screenshot <session_id>
  */
-import { existsSync, readFileSync, mkdirSync, watch, writeFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, watch, writeFileSync, copyFileSync, readdirSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { discoverBundledSkills } from './cli/skills-discovery.js';
 import { WebSocketClient } from './ipc/websocket-client.js';
-import { writeSessionStatus, readSessionStatus, appendSessionLog, listSessions, deleteSessionFiles, getSessionLogPath, getSessionScreenshotPath, } from './cli/session-files.js';
+import { EXIT_OK, EXIT_TASK_ERROR, EXIT_CLI_ERROR, EXIT_TIMEOUT } from './cli/exit-codes.js';
+import { parseDuration } from './cli/arg-parser.js';
+import { writeSessionStatus, readSessionStatus, appendSessionLog, listSessions, deleteSessionFiles, getSessionLogPath, getSessionScreenshotPath, pruneOldSessions, } from './cli/session-files.js';
 import { buildScreenshotPayload, buildStatusPayload, buildStopPayload, buildTaskCompletePayload, buildTaskErrorPayload, } from './cli/json-output.js';
 // Parse command line arguments
 const args = process.argv.slice(2);
 const command = args[0];
 const jsonOutput = args.includes('--json');
+const quietMode = args.includes('--quiet') || args.includes('-q');
+const verboseMode = args.includes('--verbose');
 let connection;
-// Track completion for blocking start
+let pendingOutcome = null;
 let pendingResolve = null;
 let activeSessionId = null;
 let pendingScreenshotResolve = null;
@@ -36,11 +41,13 @@ async function initConnection() {
     connection = new WebSocketClient({
         role: 'cli',
         autoStartRelay: true,
-        onDisconnect: () => console.error('[CLI] Relay connection lost, will reconnect'),
+        onDisconnect: quietMode ? undefined : () => console.error('[CLI] Relay connection lost, will reconnect'),
+        quiet: quietMode,
     });
     connection.onMessage(handleMessage);
     await connection.connect();
-    console.error('[CLI] Connected to WebSocket relay');
+    if (!quietMode)
+        console.error('[CLI] Connected to WebSocket relay');
 }
 function handleMessage(message) {
     const { type, sessionId, ...data } = message;
@@ -54,11 +61,18 @@ function handleMessage(message) {
     const step = data.step || data.status || data.message;
     switch (type) {
         case 'task_update':
-            if (step && step !== 'thinking' && !step.startsWith('[thinking]')) {
-                appendSessionLog(sessionId, step);
-                writeSessionStatus(sessionId, { status: 'running' });
-                if (!jsonOutput)
-                    console.log(`  ${step.slice(0, 100)}`);
+            if (step) {
+                const isThinking = step === 'thinking' || step.startsWith('[thinking]');
+                if (!isThinking || verboseMode) {
+                    appendSessionLog(sessionId, step);
+                    writeSessionStatus(sessionId, { status: 'running' });
+                    if (jsonOutput) {
+                        console.log(JSON.stringify({ type: 'task_update', session_id: sessionId, step }));
+                    }
+                    else if (!quietMode) {
+                        console.error(`  ${step.slice(0, 100)}`);
+                    }
+                }
             }
             break;
         case 'task_complete': {
@@ -68,12 +82,14 @@ function handleMessage(message) {
             appendSessionLog(sessionId, `[COMPLETE] ${answer}`);
             writeSessionStatus(sessionId, { status: 'complete', result: answer });
             if (jsonOutput) {
-                console.log(JSON.stringify(buildTaskCompletePayload(sessionId, result)));
+                console.log(JSON.stringify({ type: 'task_complete', ...buildTaskCompletePayload(sessionId, result) }));
             }
             else {
-                console.log(`\n[CLI] Task completed: ${sessionId}`);
+                if (!quietMode)
+                    console.error(`\n[CLI] Task completed: ${sessionId}`);
                 console.log(answer);
             }
+            pendingOutcome = 'complete';
             pendingResolve?.();
             break;
         }
@@ -81,11 +97,12 @@ function handleMessage(message) {
             appendSessionLog(sessionId, `[ERROR] ${data.error}`);
             writeSessionStatus(sessionId, { status: 'error', error: data.error });
             if (jsonOutput) {
-                console.log(JSON.stringify(buildTaskErrorPayload(sessionId, data.error)));
+                console.log(JSON.stringify({ type: 'task_error', ...buildTaskErrorPayload(sessionId, data.error) }));
             }
             else {
                 console.error(`\n[CLI] Task error: ${data.error}`);
             }
+            pendingOutcome = 'error';
             pendingResolve?.();
             break;
         case 'screenshot':
@@ -97,39 +114,54 @@ function handleMessage(message) {
     }
 }
 async function waitForTaskCompletion(timeoutMs = 5 * 60 * 1000) {
-    await new Promise((resolve) => {
-        pendingResolve = resolve;
+    return new Promise((resolve) => {
+        pendingResolve = () => resolve(pendingOutcome ?? 'complete');
         setTimeout(() => {
             console.error(`\n[CLI] Task timed out after ${Math.round(timeoutMs / 60000)} minutes`);
-            resolve();
+            resolve('timeout');
         }, timeoutMs);
     });
 }
-function disconnectAndExit(code = 0) {
+function outcomeToExitCode(outcome) {
+    switch (outcome) {
+        case 'complete': return EXIT_OK;
+        case 'error': return EXIT_TASK_ERROR;
+        case 'timeout': return EXIT_TIMEOUT;
+    }
+}
+function disconnectAndExit(code = EXIT_OK) {
     connection?.disconnect();
-    setTimeout(() => process.exit(code), 100);
+    process.exit(code);
 }
 // --- Commands ---
 function loadSkillPrompt(skillName) {
-    // Resolve relative to package root: dist/cli.js → ../skills/<name>/SKILL.md
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    const skillPath = join(__dirname, '..', 'skills', skillName, 'SKILL.md');
-    if (!existsSync(skillPath))
+    const skill = discoverBundledSkills().find(s => s.name === skillName);
+    if (!skill)
         return null;
-    const content = readFileSync(skillPath, 'utf-8');
-    // Strip frontmatter
+    const mdPath = join(skill.path, 'SKILL.md');
+    if (!existsSync(mdPath))
+        return null;
+    const content = readFileSync(mdPath, 'utf-8');
     return content.replace(/^---[\s\S]*?---\n*/m, '').trim();
 }
 async function cmdStart() {
-    const task = args[1];
+    let task = args[1];
+    if (!task && !process.stdin.isTTY) {
+        const chunks = [];
+        for await (const chunk of process.stdin)
+            chunks.push(Buffer.from(chunk));
+        task = Buffer.concat(chunks).toString('utf-8').trim();
+    }
     if (!task) {
-        console.error('Usage: hanzi-browser start "task description" [--url URL] [--context TEXT] [--skill NAME]');
-        process.exit(1);
+        console.error('Usage: hanzi-browse start "task description" [--url URL] [--context TEXT] [--skill NAME] [--timeout 5m]');
+        console.error('       echo "task" | hanzi-browse start   (also works)');
+        process.exit(EXIT_CLI_ERROR);
     }
     let url;
     let context;
     let skill;
+    let timeoutMs = 5 * 60 * 1000; // default 5 min
+    const detach = args.includes('--detach') || args.includes('-d');
     for (let i = 2; i < args.length; i++) {
         if (args[i] === '--url' || args[i] === '-u')
             url = args[++i];
@@ -137,26 +169,36 @@ async function cmdStart() {
             context = args[++i];
         else if (args[i] === '--skill' || args[i] === '-s')
             skill = args[++i];
+        else if (args[i] === '--timeout' || args[i] === '-t') {
+            try {
+                timeoutMs = parseDuration(args[++i]);
+            }
+            catch (e) {
+                console.error(`Invalid --timeout: ${e.message}`);
+                process.exit(EXIT_CLI_ERROR);
+            }
+        }
     }
     // Inject skill prompt as context
     if (skill) {
         const skillPrompt = loadSkillPrompt(skill);
         if (!skillPrompt) {
+            const available = discoverBundledSkills().map(s => s.name).join(', ');
             console.error(`Unknown skill: ${skill}`);
-            console.error(`Available: ${SKILL_REGISTRY.map(s => s.name).join(', ')}`);
-            process.exit(1);
+            console.error(`Available: ${available}`);
+            process.exit(EXIT_CLI_ERROR);
         }
         context = context
             ? `${skillPrompt}\n\n---\n\nAdditional context: ${context}`
             : skillPrompt;
     }
-    if (!jsonOutput) {
-        console.log('[CLI] Starting browser task...');
-        console.log(`  Task: ${task}`);
+    if (!jsonOutput && !quietMode) {
+        console.error('[CLI] Starting browser task...');
+        console.error(`  Task: ${task}`);
         if (url)
-            console.log(`  URL: ${url}`);
+            console.error(`  URL: ${url}`);
         if (context)
-            console.log(`  Context: ${context.substring(0, 50)}...`);
+            console.error(`  Context: ${context.substring(0, 50)}...`);
     }
     await initConnection();
     const sessionId = randomUUID().slice(0, 8);
@@ -175,16 +217,26 @@ async function cmdStart() {
         url,
         context,
     });
-    if (!jsonOutput) {
-        console.log(`\n[CLI] Session: ${sessionId}`);
-        console.log(`  Status: ~/.hanzi-browse/sessions/${sessionId}.json`);
-        console.log(`  Logs:   ~/.hanzi-browse/sessions/${sessionId}.log`);
-        console.log(`  Skills: run \`hanzi-browser skills\` for optimized workflows (e.g. LinkedIn prospecting)`);
-        console.log('\nWaiting for completion...\n');
+    if (detach) {
+        if (jsonOutput) {
+            console.log(JSON.stringify({ session_id: sessionId, status: 'detached' }));
+        }
+        else {
+            console.log(sessionId);
+        }
+        disconnectAndExit(EXIT_OK);
+        return;
+    }
+    if (!jsonOutput && !quietMode) {
+        console.error(`\n[CLI] Session: ${sessionId}`);
+        console.error(`  Status: ~/.hanzi-browse/sessions/${sessionId}.json`);
+        console.error(`  Logs:   ~/.hanzi-browse/sessions/${sessionId}.log`);
+        console.error(`  Skills: run \`hanzi-browser skills\` for optimized workflows (e.g. LinkedIn prospecting)`);
+        console.error('\nWaiting for completion...\n');
     }
     // Block until task completes
-    await waitForTaskCompletion();
-    disconnectAndExit(0);
+    const outcome = await waitForTaskCompletion(timeoutMs);
+    disconnectAndExit(outcomeToExitCode(outcome));
 }
 function cmdStatus() {
     const sessionId = args[1]?.startsWith('--') ? undefined : args[1];
@@ -192,11 +244,12 @@ function cmdStatus() {
         const status = readSessionStatus(sessionId);
         if (!status) {
             console.error(`Session not found: ${sessionId}`);
-            process.exit(1);
+            process.exit(EXIT_CLI_ERROR);
         }
         console.log(JSON.stringify(buildStatusPayload(status), jsonOutput ? undefined : null, jsonOutput ? undefined : 2));
     }
     else {
+        pruneOldSessions(); // opportunistic cleanup
         const allSessions = listSessions();
         if (jsonOutput) {
             console.log(JSON.stringify(buildStatusPayload(allSessions)));
@@ -216,30 +269,42 @@ function cmdStatus() {
 async function cmdMessage() {
     const sessionId = args[1];
     const message = args[2];
+    let timeoutMs = 5 * 60 * 1000;
+    for (let i = 3; i < args.length; i++) {
+        if (args[i] === '--timeout' || args[i] === '-t') {
+            try {
+                timeoutMs = parseDuration(args[++i]);
+            }
+            catch (e) {
+                console.error(`Invalid --timeout: ${e.message}`);
+                process.exit(EXIT_CLI_ERROR);
+            }
+        }
+    }
     if (!sessionId || !message) {
-        console.error('Usage: hanzi-browser message <session_id> "message"');
-        process.exit(1);
+        console.error('Usage: hanzi-browser message <session_id> "message" [--timeout 5m]');
+        process.exit(EXIT_CLI_ERROR);
     }
     activeSessionId = sessionId;
     await initConnection();
     await connection.send({ type: 'mcp_send_message', sessionId, message });
     appendSessionLog(sessionId, `[USER] ${message}`);
-    console.log(`Message sent to session ${sessionId}`);
-    console.log('Waiting for completion...\n');
-    await waitForTaskCompletion();
-    disconnectAndExit(0);
+    console.error(`Message sent to session ${sessionId}`);
+    console.error('Waiting for completion...\n');
+    const outcome = await waitForTaskCompletion(timeoutMs);
+    disconnectAndExit(outcomeToExitCode(outcome));
 }
 function cmdLogs() {
     const sessionId = args[1];
     const follow = args.includes('--follow') || args.includes('-f');
     if (!sessionId) {
         console.error('Usage: hanzi-browser logs <session_id> [--follow]');
-        process.exit(1);
+        process.exit(EXIT_CLI_ERROR);
     }
     const logPath = getSessionLogPath(sessionId);
     if (!existsSync(logPath)) {
         console.error(`Log file not found: ${logPath}`);
-        process.exit(1);
+        process.exit(EXIT_CLI_ERROR);
     }
     const content = readFileSync(logPath, 'utf-8');
     console.log(content.split('\n').slice(-50).join('\n'));
@@ -261,7 +326,7 @@ async function cmdStop() {
     const remove = args.includes('--remove') || args.includes('-r');
     if (!sessionId) {
         console.error('Usage: hanzi-browser stop <session_id> [--remove]');
-        process.exit(1);
+        process.exit(EXIT_CLI_ERROR);
     }
     activeSessionId = sessionId;
     await initConnection();
@@ -304,7 +369,7 @@ async function cmdScreenshot() {
     });
     if (!data) {
         console.error('[CLI] Screenshot timed out');
-        disconnectAndExit(1);
+        disconnectAndExit(EXIT_CLI_ERROR);
         return;
     }
     const screenshotPath = getSessionScreenshotPath(requestId);
@@ -319,67 +384,65 @@ async function cmdScreenshot() {
 }
 // --- Skills ---
 const SKILLS_BASE_URL = 'https://raw.githubusercontent.com/hanzili/hanzi-browse/main/server/skills';
-const SKILL_REGISTRY = [
-    {
-        name: 'linkedin-prospector',
-        description: 'Find people on LinkedIn and send personalized connection requests',
-        files: ['SKILL.md'],
-    },
-    {
-        name: 'e2e-tester',
-        description: 'Test your web app in a real browser — reports bugs with code references',
-        files: ['SKILL.md'],
-    },
-    {
-        name: 'social-poster',
-        description: 'Post across LinkedIn, Twitter, Reddit, HN — drafts per-platform, posts from your browser',
-        files: ['SKILL.md'],
-    },
-];
 async function cmdSkills() {
+    const skills = discoverBundledSkills();
     const subcommand = args[1];
     if (subcommand === 'install') {
         const skillName = args[2];
+        const useLatest = args.includes('--latest');
         if (!skillName) {
-            console.error('Usage: hanzi-browser skills install <name>');
-            process.exit(1);
+            console.error('Usage: hanzi-browse skills install <name> [--latest]');
+            process.exit(EXIT_CLI_ERROR);
         }
-        const skill = SKILL_REGISTRY.find(s => s.name === skillName);
-        if (!skill) {
-            console.error(`Unknown skill: ${skillName}`);
-            console.error(`Available: ${SKILL_REGISTRY.map(s => s.name).join(', ')}`);
-            process.exit(1);
+        if (useLatest) {
+            await installSkillFromGitHub(skillName);
         }
-        // Detect the right directory
-        const targetDir = detectSkillsDir(skillName);
-        mkdirSync(targetDir, { recursive: true });
-        console.log(`Installing ${skillName}...`);
-        for (const file of skill.files) {
-            const url = `${SKILLS_BASE_URL}/${skillName}/${file}`;
-            try {
-                const response = await fetch(url);
-                if (!response.ok)
-                    throw new Error(`HTTP ${response.status}`);
-                const content = await response.text();
-                const filePath = join(targetDir, file);
-                writeFileSync(filePath, content);
-                console.log(`  → ${filePath}`);
+        else {
+            const skill = skills.find(s => s.name === skillName);
+            if (!skill) {
+                console.error(`Unknown skill: ${skillName}`);
+                console.error(`Bundled: ${skills.map(s => s.name).join(', ')}`);
+                console.error(`Try --latest to fetch from GitHub.`);
+                process.exit(EXIT_CLI_ERROR);
             }
-            catch (err) {
-                console.error(`  Failed to download ${file}: ${err.message}`);
-                process.exit(1);
-            }
+            await installSkillFromLocal(skill);
         }
-        console.log(`\nDone! "${skillName}" is ready to use.`);
         return;
     }
-    // Default: list available skills
     console.log('\nAvailable skills:\n');
-    for (const skill of SKILL_REGISTRY) {
-        console.log(`  ${skill.name.padEnd(24)} ${skill.description}`);
+    for (const skill of skills) {
+        console.log(`  ${skill.name.padEnd(28)} [${skill.category}] ${skill.description.slice(0, 80)}`);
     }
-    console.log(`\nInstall: hanzi-browser skills install <name>`);
+    console.log(`\nInstall: hanzi-browse skills install <name>`);
     console.log(`Browse:  https://browse.hanzilla.co/skills\n`);
+}
+async function installSkillFromLocal(skill) {
+    const targetDir = detectSkillsDir(skill.name);
+    mkdirSync(targetDir, { recursive: true });
+    for (const file of readdirSync(skill.path)) {
+        try {
+            copyFileSync(join(skill.path, file), join(targetDir, file));
+        }
+        catch { }
+    }
+    console.log(`Installed ${skill.name} (bundled) → ${targetDir}`);
+}
+async function installSkillFromGitHub(skillName) {
+    const targetDir = detectSkillsDir(skillName);
+    mkdirSync(targetDir, { recursive: true });
+    const url = `${SKILLS_BASE_URL}/${skillName}/SKILL.md`;
+    try {
+        const response = await fetch(url);
+        if (!response.ok)
+            throw new Error(`HTTP ${response.status}`);
+        const content = await response.text();
+        writeFileSync(join(targetDir, 'SKILL.md'), content);
+        console.log(`Installed ${skillName} (latest) → ${targetDir}`);
+    }
+    catch (err) {
+        console.error(`Failed to fetch ${skillName}: ${err.message}`);
+        process.exit(EXIT_CLI_ERROR);
+    }
 }
 function detectSkillsDir(skillName) {
     // Check for common agent skill directories in the current project
@@ -392,6 +455,19 @@ function detectSkillsDir(skillName) {
     }
     // Default to .agents/skills (most portable)
     return join('.agents', 'skills', skillName);
+}
+async function cmdDoctor() {
+    const { runDoctor, renderDoctorReport } = await import('./cli/doctor.js');
+    const report = await runDoctor();
+    if (jsonOutput) {
+        console.log(JSON.stringify(report, null, 2));
+    }
+    else {
+        console.log(renderDoctorReport(report));
+    }
+    // Exit non-zero if anything critical is off
+    const ok = report.relayReachable && report.credentials.length > 0;
+    process.exit(ok ? EXIT_OK : EXIT_CLI_ERROR);
 }
 async function cmdSetup() {
     const { runSetup } = await import('./cli/setup.js');
@@ -416,6 +492,12 @@ async function cmdSetup() {
     }
     await runSetup({ only, yes, all, skills });
 }
+function cmdVersion() {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    console.log(pkg.version);
+    process.exit(0);
+}
 function cmdHelp() {
     console.log(`
 Hanzi Browser CLI - Browser automation from the command line
@@ -432,8 +514,10 @@ Commands:
     --url, -u <url>         Starting URL
     --context, -c <text>    Context information for the task
     --skill, -s <name>      Use a bundled skill (e.g. linkedin-prospector)
-                            Blocks until complete or timeout.
-                            You can run multiple start commands in parallel.
+    --detach, -d            Return session_id immediately and exit 0 (non-blocking).
+                            Useful for running multiple tasks in parallel.
+                            Check progress with \`status\` or \`logs\`.
+                            Blocks until complete or timeout by default.
                             Each session gets its own browser window.
 
   status [session_id]       Show status of session(s)
@@ -460,6 +544,9 @@ Commands:
 
   skills                    List available agent skills
   skills install <name>     Download a skill into your project
+
+  doctor                    Diagnose setup (extension, credentials, API, recent sessions)
+    --json                  Output machine-readable JSON
 
   help                      Show this help message
 
@@ -497,7 +584,11 @@ Skills:
 `);
 }
 // --- Main ---
-async function main() {
+export async function main() {
+    const invokedAs = process.argv[1] ? process.argv[1].split('/').pop() : '';
+    if (invokedAs === 'hanzi-browser') {
+        console.error('\x1b[33m[deprecation]\x1b[0m `hanzi-browser` is deprecated. Use `hanzi-browse` instead. Will be removed in v2.5.');
+    }
     switch (command) {
         case 'start':
             await cmdStart();
@@ -523,6 +614,14 @@ async function main() {
         case 'setup':
             await cmdSetup();
             break;
+        case 'doctor':
+            await cmdDoctor();
+            break;
+        case 'version':
+        case '--version':
+        case '-v':
+            cmdVersion();
+            break;
         case 'help':
         case '--help':
         case '-h':
@@ -532,10 +631,17 @@ async function main() {
         default:
             console.error(`Unknown command: ${command}`);
             cmdHelp();
-            process.exit(1);
+            process.exit(EXIT_CLI_ERROR);
     }
 }
-main().catch((err) => {
-    console.error('[CLI] Error:', err);
-    process.exit(1);
-});
+// Auto-run only when executed directly — NOT when imported from index.ts.
+// When imported (via the hanzi-browse subcommand dispatch), index.ts calls main()
+// explicitly and awaits it, so premature process.exit doesn't kill async commands.
+const isEntryPoint = process.argv[1] &&
+    (process.argv[1].endsWith('/cli.js') || process.argv[1].endsWith('hanzi-browser'));
+if (isEntryPoint) {
+    main().catch((err) => {
+        console.error('[CLI] Error:', err);
+        process.exit(EXIT_CLI_ERROR);
+    });
+}

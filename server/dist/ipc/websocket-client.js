@@ -31,6 +31,10 @@ export class WebSocketClient {
             ...options,
         };
     }
+    log(...args) {
+        if (!this.options.quiet)
+            console.error(...args);
+    }
     /**
      * Register a handler for incoming messages
      */
@@ -54,20 +58,20 @@ export class WebSocketClient {
         if (this.connected && this.ws?.readyState === WebSocket.OPEN) {
             return; // Already connected
         }
-        const relayUrl = this.options.relayUrl || getRelayUrl();
+        const relayUrl = process.env.HANZI_RELAY_URL || this.options.relayUrl || getRelayUrl();
         // Auto-start relay if configured
         if (this.options.autoStartRelay) {
             try {
                 await ensureRelayRunning(relayUrl);
             }
             catch (err) {
-                console.error(`[WSClient] Failed to start relay: ${err.message}`);
+                this.log(`[WSClient] Failed to start relay: ${err.message}`);
                 throw err;
             }
         }
         return new Promise((resolve, reject) => {
             try {
-                console.error(`[WSClient] Connecting to relay: ${relayUrl}`);
+                this.log(`[WSClient] Connecting to relay: ${relayUrl}`);
                 this.ws = new WebSocket(relayUrl);
                 const connectTimeout = setTimeout(() => {
                     if (!this.connected) {
@@ -85,7 +89,7 @@ export class WebSocketClient {
                         role: this.options.role,
                         ...this.options.registerExtra,
                     }));
-                    console.error(`[WSClient] Connected as ${this.options.role}`);
+                    this.log(`[WSClient] Connected as ${this.options.role}`);
                     resolve();
                 });
                 this.ws.on('message', (data) => {
@@ -95,17 +99,17 @@ export class WebSocketClient {
                         if (message.type === 'registered')
                             return;
                         if (message.type === 'error') {
-                            console.error(`[WSClient] Relay error: ${message.error}`);
+                            this.log(`[WSClient] Relay error: ${message.error}`);
                             return;
                         }
                         this.dispatchMessage(message);
                     }
                     catch (e) {
-                        console.error('[WSClient] Failed to parse message:', e);
+                        this.log('[WSClient] Failed to parse message:', e);
                     }
                 });
                 this.ws.on('close', () => {
-                    console.error('[WSClient] Disconnected from relay');
+                    this.log('[WSClient] Disconnected from relay');
                     this.connected = false;
                     this.ws = null;
                     if (this.options.onDisconnect) {
@@ -116,7 +120,7 @@ export class WebSocketClient {
                 });
                 this.ws.on('error', (err) => {
                     clearTimeout(connectTimeout);
-                    console.error(`[WSClient] WebSocket error: ${err.message}`);
+                    this.log(`[WSClient] WebSocket error: ${err.message}`);
                     if (!this.connected) {
                         reject(err);
                     }
@@ -136,7 +140,7 @@ export class WebSocketClient {
                 await handler(message);
             }
             catch (err) {
-                console.error('[WSClient] Handler error:', err);
+                this.log('[WSClient] Handler error:', err);
             }
         }
     }
@@ -183,15 +187,15 @@ export class WebSocketClient {
             return;
         const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
         this.reconnectAttempts++;
-        console.error(`[WSClient] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        this.log(`[WSClient] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
         this.reconnectTimer = setTimeout(async () => {
             this.reconnectTimer = null;
             try {
                 await this.connect();
-                console.error('[WSClient] Reconnected successfully');
+                this.log('[WSClient] Reconnected successfully');
             }
             catch (err) {
-                console.error(`[WSClient] Reconnection failed: ${err.message}`);
+                this.log(`[WSClient] Reconnection failed: ${err.message}`);
                 // onclose handler will schedule next attempt
             }
         }, delay);

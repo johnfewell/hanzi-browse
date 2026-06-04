@@ -17,6 +17,8 @@ export interface WebSocketClientOptions extends ConnectionOptions {
     autoStartRelay?: boolean;
     /** Extra fields to include in the register message (e.g., relay_secret) */
     registerExtra?: Record<string, string>;
+    /** Suppress all [WSClient] log output (default: false) */
+    quiet?: boolean;
 }
 /**
  * WebSocket-based connection to the Chrome extension via relay server.
@@ -36,6 +38,7 @@ export declare class WebSocketClient {
     private reconnectAttempts;
     private maxReconnectDelay;
     constructor(options: WebSocketClientOptions);
+    private log;
     /**
      * Register a handler for incoming messages
      */

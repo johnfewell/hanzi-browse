@@ -5,13 +5,13 @@
  * then merges the Hanzi MCP server entry into each agent's config file.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, readdirSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { discoverBundledSkills as discoverSkills } from './skills-discovery.js';
+import { join } from 'path';
 import { homedir, platform } from 'os';
 import { execSync } from 'child_process';
 import { createInterface } from 'readline';
 import { randomUUID } from 'crypto';
-import { isRelayRunning } from '../relay/auto-start.js';
+import { isRelayRunning, ensureRelayRunning } from '../relay/auto-start.js';
 import { WebSocketClient } from '../ipc/websocket-client.js';
 import { detectCredentialSources as detectSources, checkCredentialFlowResult, } from './detect-credentials.js';
 import { initTelemetry, trackEvent, shutdownTelemetry } from '../telemetry.js';
@@ -72,9 +72,10 @@ export function getAgentRegistry(deps = {}) {
     const xdgConfigHome = deps.xdgConfigHome ?? process.env.XDG_CONFIG_HOME ?? join(home, '.config');
     const pathExists = deps.pathExists ?? existsSync;
     const runCommand = deps.runCommand ?? execSync;
+    const lookupCmd = plat === 'win32' ? 'where' : 'which';
     const hasCli = (bin) => {
         try {
-            runCommand(`which ${bin}`, { stdio: 'ignore' });
+            runCommand(`${lookupCmd} ${bin}`, { stdio: 'ignore' });
             return true;
         }
         catch {
@@ -306,6 +307,10 @@ function runClaudeCodeSetup() {
 }
 // ── Browser detection ──────────────────────────────────────────────────
 const EXTENSION_URL = 'https://chromewebstore.google.com/detail/hanzi-browse/iklpkemlmbhemkiojndpbhoakgikpmcd';
+// Per-user Chromium installs land under %LOCALAPPDATA% — a user without admin
+// rights on Windows can only install browsers this way, so omitting these
+// paths makes setup report "No Chromium browser found" on locked-down laptops.
+const WIN_LOCAL_APP_DATA = process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local');
 const BROWSERS = [
     {
         name: 'Google Chrome',
@@ -315,6 +320,7 @@ const BROWSERS = [
         winPaths: [
             'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
             'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            join(WIN_LOCAL_APP_DATA, 'Google', 'Chrome', 'Application', 'chrome.exe'),
         ],
     },
     {
@@ -325,6 +331,7 @@ const BROWSERS = [
         winPaths: [
             'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
             'C:\\Program Files (x86)\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+            join(WIN_LOCAL_APP_DATA, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
         ],
     },
     {
@@ -352,6 +359,7 @@ const BROWSERS = [
         winPaths: [
             'C:\\Program Files\\Chromium\\Application\\chrome.exe',
             'C:\\Program Files (x86)\\Chromium\\Application\\chrome.exe',
+            join(WIN_LOCAL_APP_DATA, 'Chromium', 'Application', 'chrome.exe'),
         ],
     },
 ];
@@ -408,8 +416,9 @@ function openInBrowser(browser, url) {
     }
 }
 async function ensureExtension(isInteractive) {
-    // Already connected?
-    if (await isRelayRunning())
+    // Already connected? (starts the relay so the extension can connect, then
+    // verifies the extension actually registered — not just that the port is open)
+    if (await isExtensionConnected())
         return true;
     // Detect browsers
     const browsers = detectBrowsers();
@@ -450,7 +459,7 @@ async function ensureExtension(isInteractive) {
     const sp = spinner('Waiting for extension to connect...', isInteractive);
     for (let i = 0; i < 90; i++) { // 3 minutes max
         await sleep(2000);
-        if (await isRelayRunning()) {
+        if (await isExtensionConnected()) {
             sp.stop(`${c.green('✓')}  Extension ${c.green('connected')}`);
             return true;
         }
@@ -506,6 +515,39 @@ async function sendToExtension(type, payload) {
         return false;
     }
 }
+/**
+ * Check whether a Chrome extension has actually registered with the relay.
+ *
+ * The extension is a WebSocket *client* — it cannot open the relay port itself,
+ * so we start the relay first (giving the extension something to connect to),
+ * then ask the relay whether an `extension` role is registered. This is the
+ * real signal: isRelayRunning() only proves the port is open, not that the
+ * extension is connected.
+ */
+async function isExtensionConnected() {
+    const origError = console.error;
+    console.error = () => { };
+    try {
+        await ensureRelayRunning();
+    }
+    catch {
+        return false;
+    }
+    finally {
+        console.error = origError;
+    }
+    if (!relay?.isConnected() && !(await connectRelay()))
+        return false;
+    const requestId = randomUUID().slice(0, 8);
+    try {
+        await relay.send({ type: 'status_query', requestId });
+    }
+    catch {
+        return false;
+    }
+    const res = await waitForRelayResponse('status_response', requestId, 2000);
+    return !!res?.extensionConnected;
+}
 // ── Credential setup ──────────────────────────────────────────────────
 function keychainHas(service) {
     if (platform() !== 'darwin')
@@ -538,110 +580,12 @@ async function promptAccessMode(isInteractive) {
     console.log(`        ${c.dim('Bring your own Claude, GPT, Gemini, or custom API key.')}`);
     console.log(`        ${c.dim('Everything runs locally — no data leaves your machine.')}`);
     console.log('');
-    console.log(`     ${c.bold('2')}  ${c.cyan('Hanzi managed')} ${c.dim('($0.05/task, 20 free/month)')}`);
-    console.log(`        ${c.dim('We handle the AI — no API key needed.')}`);
-    console.log(`        ${c.dim('Sign in with Google, get 20 free tasks instantly.')}`);
-    console.log('');
     console.log(`     ${c.dim('s')}  ${c.dim('Skip — set up later')}`);
     console.log('');
-    const choice = await ask('Choose (1/2/s): ');
-    if (choice === '2')
-        return 'managed';
+    const choice = await ask('Choose (1/s): ');
     if (choice.toLowerCase() === 's')
         return 'skip';
     return 'byom'; // default for '1' or anything else
-}
-// ── Managed access ──────────────────────────────────────────────────
-const MANAGED_DASHBOARD_URL = 'https://api.hanzilla.co/dashboard';
-const MANAGED_SIGNIN_URL = 'https://api.hanzilla.co/api/auth/sign-in/social';
-let managedApiKey = null;
-async function handleManagedAccess() {
-    console.log('');
-    console.log(`  ${c.cyan('●')}  ${c.bold('Hanzi managed')}`);
-    console.log(`  ${c.dim('     20 free tasks/month. Only completed tasks count.')}\n`);
-    console.log(`     Opening your browser to sign in...`);
-    openUrl(MANAGED_DASHBOARD_URL);
-    console.log(`     ${c.cyan(MANAGED_DASHBOARD_URL)}`);
-    console.log('');
-    console.log(`     ${c.bold('1.')} Sign in with Google`);
-    console.log(`     ${c.bold('2.')} Create an API key in the dashboard`);
-    console.log(`     ${c.bold('3.')} Copy and paste it below\n`);
-    const key = await ask('  Paste your API key (hic_live_...): ');
-    const trimmed = key.trim();
-    if (!trimmed || !trimmed.startsWith('hic_live_')) {
-        console.log(`\n  ${c.yellow('●')}  Skipped. You can set up managed later by running setup again.`);
-        return;
-    }
-    // Validate the key
-    try {
-        const res = await fetch(`https://api.hanzilla.co/v1/billing/credits`, {
-            headers: { Authorization: `Bearer ${trimmed}` },
-        });
-        const data = await res.json();
-        if (res.ok && data.free_remaining !== undefined) {
-            managedApiKey = trimmed;
-            console.log(`\n  ${c.green('✓')}  Key validated! ${data.free_remaining} free tasks + ${data.credit_balance || 0} credits available.`);
-        }
-        else {
-            console.log(`\n  ${c.red('✗')}  Invalid key: ${data.error || 'authentication failed'}`);
-            console.log(`     Check the key in your dashboard at ${c.cyan(MANAGED_DASHBOARD_URL)}`);
-        }
-    }
-    catch (err) {
-        console.log(`\n  ${c.yellow('●')}  Could not validate key (network error). Saving anyway.`);
-        managedApiKey = trimmed;
-    }
-}
-function openUrl(url) {
-    try {
-        const cmd = platform() === 'darwin' ? `open "${url}"`
-            : platform() === 'win32' ? `start "${url}"`
-                : `xdg-open "${url}"`;
-        execSync(cmd, { stdio: 'ignore' });
-    }
-    catch { }
-}
-/**
- * Re-inject MCP configs with HANZI_API_KEY env var for managed mode.
- * Updates JSON configs directly. For Claude Code, re-runs the CLI command with env.
- */
-async function injectManagedKey(apiKey, agents) {
-    const managedEntry = {
-        ...MCP_ENTRY,
-        env: { HANZI_API_KEY: apiKey },
-    };
-    for (const agent of agents) {
-        try {
-            if (agent.method === 'json-merge' && agent.configPath) {
-                const configPath = agent.configPath();
-                if (existsSync(configPath)) {
-                    const raw = readFileSync(configPath, 'utf-8');
-                    const config = JSON.parse(raw);
-                    const configSection = agent.configSection ?? 'mcpServers';
-                    removeLegacyHanziEntries(config, configSection, agent.legacyConfigSections ?? []);
-                    if (config[configSection]?.["hanzi-browser"]) {
-                        config[configSection]["hanzi-browser"] = managedEntry;
-                        writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-                        console.log(`     ${c.green('✓')}  Updated ${agent.name} with managed API key`);
-                    }
-                }
-            }
-            else if (agent.method === 'cli-command' && agent.slug === 'claude-code') {
-                // Claude Code: remove and re-add with env
-                try {
-                    execSync('claude mcp remove browser', { stdio: 'ignore' });
-                }
-                catch { }
-                execSync(`claude mcp add browser -e HANZI_API_KEY=${apiKey} -- npx -y hanzi-browse`, {
-                    stdio: 'ignore',
-                });
-                console.log(`     ${c.green('✓')}  Updated Claude Code with managed API key`);
-            }
-        }
-        catch (err) {
-            console.log(`     ${c.yellow('●')}  Could not update ${agent.name}: ${err.message}`);
-        }
-    }
 }
 // ── BYOM credential setup ────────────────────────────────────────────
 async function promptByomCredentials() {
@@ -753,65 +697,30 @@ function disconnectRelay() {
         setTimeout(() => { console.error = origError; }, 500);
     }
 }
-const VALID_CATEGORIES = ['core', 'productivity', 'marketing', 'life'];
+function waitForRelayResponse(expectedType, requestId, timeoutMs) {
+    return new Promise((resolve) => {
+        if (!relay)
+            return resolve(null);
+        const timer = setTimeout(() => {
+            relay?.offMessage(onMsg);
+            resolve(null);
+        }, timeoutMs);
+        const onMsg = (msg) => {
+            if (msg.type === expectedType && msg.requestId === requestId) {
+                clearTimeout(timer);
+                relay?.offMessage(onMsg);
+                resolve(msg);
+            }
+        };
+        relay.onMessage(onMsg);
+    });
+}
+// ── Skill installation ──────────────────────────────────────────────────
 const CATEGORY_BUNDLES = [
     { cat: 'productivity', label: 'Productivity', summary: 'testing, audits, data extraction, SEO' },
     { cat: 'marketing', label: 'Marketing & growth', summary: 'social posting, prospecting, competitor research' },
     { cat: 'life', label: 'Personal automation', summary: 'apartments, jobs' },
 ];
-function getSkillsSource() {
-    // Skills are bundled in the npm package at ../skills/ relative to dist/cli/
-    const fromDist = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills');
-    if (existsSync(fromDist))
-        return fromDist;
-    // Fallback: running from source at src/cli/
-    const fromSrc = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'skills');
-    return fromSrc;
-}
-function parseSkillFrontmatter(content) {
-    const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!match)
-        return null;
-    const result = {};
-    for (const line of match[1].split(/\r?\n/)) {
-        const m = line.match(/^(\w+):\s*(.*)$/);
-        if (!m)
-            continue;
-        const key = m[1];
-        const value = m[2].trim();
-        if (key === 'description')
-            result.description = value;
-        else if (key === 'category' && VALID_CATEGORIES.includes(value)) {
-            result.category = value;
-        }
-    }
-    return result;
-}
-function discoverSkills(skillsSource) {
-    if (!existsSync(skillsSource))
-        return [];
-    const skills = [];
-    for (const entry of readdirSync(skillsSource, { withFileTypes: true })) {
-        if (!entry.isDirectory())
-            continue;
-        const skillPath = join(skillsSource, entry.name);
-        const skillMd = join(skillPath, 'SKILL.md');
-        if (!existsSync(skillMd))
-            continue;
-        const meta = parseSkillFrontmatter(readFileSync(skillMd, 'utf-8'));
-        if (!meta)
-            continue;
-        skills.push({
-            name: entry.name,
-            description: meta.description || '',
-            // Skills without an explicit category default to productivity — a safe
-            // "opt-in bundle" rather than forcing everyone to get it by default.
-            category: meta.category ?? 'productivity',
-            path: skillPath,
-        });
-    }
-    return skills;
-}
 async function promptSkillCategories(skills) {
     const selected = new Set();
     const coreSkills = skills.filter(s => s.category === 'core');
@@ -868,8 +777,7 @@ async function promptSkillCategories(skills) {
     return selected;
 }
 async function installSkills(agents, isInteractive, options = {}) {
-    const skillsSource = getSkillsSource();
-    const discovered = discoverSkills(skillsSource);
+    const discovered = discoverSkills();
     if (discovered.length === 0)
         return;
     const agentsWithSkills = agents.filter(a => a.skillsDir);
@@ -973,12 +881,12 @@ export async function runSetup(options = {}) {
     const sp0 = spinner('Looking for the extension...', interactive);
     if (interactive)
         await sleep(400);
-    const relayUp = await isRelayRunning();
-    if (relayUp) {
-        sp0.stop(`${c.green('✓')}  Chrome extension is running`);
+    const extConnected = await isExtensionConnected();
+    if (extConnected) {
+        sp0.stop(`${c.green('✓')}  Chrome extension connected`);
     }
     else {
-        sp0.stop(`${c.dim('○')}  Chrome extension not found`);
+        sp0.stop(`${c.dim('○')}  Chrome extension not connected`);
         if (interactive) {
             console.log('');
             await ensureExtension(interactive);
@@ -1095,13 +1003,6 @@ export async function runSetup(options = {}) {
         if (accessMode === 'byom') {
             await promptByomCredentials();
         }
-        else if (accessMode === 'managed') {
-            await handleManagedAccess();
-            // Re-configure agents with HANZI_API_KEY env var
-            if (managedApiKey) {
-                await injectManagedKey(managedApiKey, detected);
-            }
-        }
         else {
             console.log(`\n  ${c.dim('○')}  ${c.dim('Skipped — set up credentials later in the Chrome extension.')}`);
         }
@@ -1130,10 +1031,7 @@ export async function runSetup(options = {}) {
         if (configured > 0) {
             console.log(`     ${c.green('▸')}  Restart your agents to pick up the new MCP config.`);
         }
-        if (accessMode === 'managed' && managedApiKey) {
-            console.log(`     ${c.cyan('▸')}  Managed mode configured — 20 free tasks/month.`);
-        }
-        else if (hasCreds) {
+        if (hasCreds) {
             console.log(`     ${c.green('▸')}  Credentials detected — Hanzi is ready to use.`);
         }
         else {
@@ -1143,14 +1041,7 @@ export async function runSetup(options = {}) {
             console.log(`     ${c.red('▸')}  ${errors} agent${errors === 1 ? '' : 's'} failed — check the errors above.`);
         }
         console.log('');
-        if (accessMode === 'managed' && managedApiKey) {
-            console.log(`  ${c.bold('Try it:')} ask your agent to do something in the browser.`);
-            console.log(`  ${c.dim('  Example: "Go to Hacker News and tell me the top 3 stories"')}`);
-        }
-        else if (accessMode === 'managed') {
-            console.log(`  ${c.bold('Next:')} sign in at ${c.cyan(MANAGED_DASHBOARD_URL)}, create an API key, and re-run setup.`);
-        }
-        else if (hasCreds) {
+        if (hasCreds) {
             console.log(`  ${c.bold('Try it:')} ask your agent to do something in the browser.`);
             console.log(`  ${c.dim('  Example: "Go to Hacker News and tell me the top 3 stories"')}`);
         }

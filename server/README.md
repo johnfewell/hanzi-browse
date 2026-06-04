@@ -2,11 +2,9 @@
 
 Give your AI agent a real browser — with your existing logins, cookies, and sessions.
 
-**Two ways to use it:**
-- **Use locally** — MCP server for Claude Code, Cursor, Codex, and other AI coding agents
-- **Build with it** — REST API + TypeScript SDK for embedding browser automation in your product
+A local MCP server for Claude Code, Cursor, Codex, and other AI coding agents. **BYOM (bring your own model)** and fully local — it drives your own Chrome with your own LLM key, and no data leaves your machine.
 
-## Quick Start (MCP)
+## Quick Start
 
 ```bash
 npx hanzi-browse setup
@@ -15,35 +13,6 @@ npx hanzi-browse setup
 This installs the Chrome extension and configures your AI agent. One command, done.
 
 **Prerequisites:** Chrome must be open with the [Hanzi extension](https://chromewebstore.google.com/detail/hanzi-browse/iklpkemlmbhemkiojndpbhoakgikpmcd) installed.
-
-## Quick Start (API)
-
-```bash
-npm install @hanzi-browse/sdk
-```
-
-```typescript
-import { HanziClient } from '@hanzi-browse/sdk';
-
-const client = new HanziClient({ apiKey: 'hic_live_...' });
-
-// 1. Pair a browser — give the URL to your user
-const { pairingToken } = await client.createPairingToken();
-// User visits: https://api.hanzilla.co/pair/{pairingToken}
-
-// 2. Find their connected session
-const sessions = await client.listSessions();
-const browser = sessions.find(s => s.status === 'connected');
-
-// 3. Run a task (polls until complete)
-const result = await client.runTask({
-  browserSessionId: browser.id,
-  task: 'Go to example.com and read the page title',
-});
-console.log(result.answer);
-```
-
-Full API docs: [browse.hanzilla.co/docs.html](https://browse.hanzilla.co/docs.html)
 
 ## MCP Tools
 
@@ -129,8 +98,8 @@ browser_start("Check hotel prices in Shibuya")
 | `HANZI_BROWSE_MAX_SESSIONS` | `5` | Max concurrent browser tasks |
 | `HANZI_BROWSE_TIMEOUT_MS` | `300000` | Task timeout (ms) |
 | `WS_RELAY_PORT` | `7862` | WebSocket relay port |
-| `POSTHOG_API_KEY` | unset | Enables PostHog analytics for local CLI telemetry, the dashboard build, the managed backend, and example apps |
-| `POSTHOG_HOST` | `https://us.i.posthog.com` | Override the PostHog host for all server-side capture calls and dashboard initialization |
+| `POSTHOG_API_KEY` | unset | Enables PostHog analytics for local CLI telemetry |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` | Override the PostHog host for server-side capture calls |
 
 ## Skills
 

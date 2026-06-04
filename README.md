@@ -37,21 +37,13 @@ connect button, Gmail needs keyboard shortcuts. Hanzi Browse ships 24 site playb
 
 <br/>
 
-## Two ways to use Hanzi Browse
-
-Same 24 site playbooks underneath. Two install paths depending on who's driving.
-
-### For your agent — a browser sub-agent for your coding agent
+## A browser sub-agent for your coding agent
 
 One command. `npx hanzi-browse setup` detects every AI agent on your machine (Claude Code, Cursor, Codex, and 9 more) and wires Hanzi Browse in as an MCP tool. Your main agent delegates browser work; a sub-agent runs the loop — *read page → plan next action → click/type/scroll → observe → repeat until done* — and returns a clean answer. Site playbooks auto-load by URL so the model already knows the quirks.
 
+It's **BYOM (bring your own model)** and fully local: it drives your own Chrome with your own logins, using your own LLM key. No hosted backend, no data leaves your machine.
+
 ![Use it now](docs/diagrams/use-it.svg)
-
-### For your product — browser automation for your users, described in English
-
-Your backend calls `runTask({ task: "…" })`. Your users' own Chrome executes it, signed in as themselves. Same 24 playbooks as the CLI, exposed as a REST API and `@hanzi-browse/sdk`. Free tools on [tools.hanzilla.co](https://tools.hanzilla.co) are built on this SDK.
-
-![Build with it](docs/diagrams/build-with-it.svg)
 
 <br/>
 
@@ -77,11 +69,10 @@ npx hanzi-browse setup
 │
 ├── 5. Install skills ───── Copies browser skills into each agent
 │
-└── 6. Choose AI mode ───── Managed ($0.05/task) or BYOM (free forever)
+└── 6. Connect your model ─ BYOM: Claude, GPT, Gemini, or any API key
 ```
 
-- **Managed** — we handle the AI. 20 free tasks/month, then $0.05/task. No API key needed.
-- **BYOM** — use your Claude Pro/Max subscription, GPT Plus, or any API key. Free forever, runs locally.
+**BYOM (bring your own model)** — use your Claude Pro/Max subscription, GPT Plus, Gemini, or any API key. Free forever, runs entirely on your machine.
 
 
 <br/>
@@ -97,17 +88,9 @@ npx hanzi-browse setup
 
 <br/>
 
-## Skills & Free Tools
+## Skills
 
-Hanzi Browse has two distribution channels. Both use the same browser automation engine and site domain knowledge:
-
-**Skills** — for users who run Hanzi Browse locally through their AI agent. The setup wizard installs skills directly into your agent (Claude Code, Cursor, etc.). Each skill teaches the agent *when* and *how* to use the browser for a specific workflow.
-
-**Free Tools** — hosted web apps that anyone can try without installing anything. Each tool is a standalone app built on the Hanzi Browse API that demonstrates a use case. Every skill can become a free tool.
-
-### Skills
-
-Installed automatically during `npx hanzi-browse setup`. Your agent reads these as markdown files.
+Skills are installed automatically during `npx hanzi-browse setup`. Your agent reads these as markdown files — each one teaches the agent *when* and *how* to use the browser for a specific workflow.
 
 | Skill | Description |
 |-------|-------------|
@@ -121,51 +104,15 @@ Installed automatically during `npx hanzi-browse setup`. Your agent reads these 
 
 Open source — [add your own](https://github.com/hanzili/hanzi-browse/tree/main/server/skills).
 
-### Free Tools
-
-Try them at [tools.hanzilla.co](https://tools.hanzilla.co). No account needed — just install the extension and go.
-
-| Tool | What it does | Try it |
-|------|-------------|--------|
-| X Marketing | AI finds relevant conversations on X, drafts personalized replies, posts from your Chrome | [tools.hanzilla.co/x-marketing](https://tools.hanzilla.co/x-marketing) |
-
 ### Site Playbooks — the context layer
 
-Both CLI and SDK rely on a shared set of **site playbooks** — verified interaction recipes for complex websites. They teach the LLM how async loading works on X, which selector hides LinkedIn's connect button, that Gmail responds to keyboard shortcuts, and how to sidestep anti-bot detection on ~20 other sites.
+The CLI and extension rely on a shared set of **site playbooks** — verified interaction recipes for complex websites. They teach the LLM how async loading works on X, which selector hides LinkedIn's connect button, that Gmail responds to keyboard shortcuts, and how to sidestep anti-bot detection on ~20 other sites.
 
 **Hints for the LLM, not brittle scripts.** The model stays in control; we just hand it the cheat sheet. When the DOM shifts, the agent adapts — no adapter to rebuild.
 
 **Currently supports 24 sites:** X, LinkedIn, Gmail, GitHub, Notion, Figma, Slack, Reddit, Amazon, eBay, Walmart, Target, Zillow, Apartments.com, Craigslist, Indeed, Google Docs, Sheets, Calendar, Drive, ChatGPT, Claude.ai, Stack Overflow.
 
 All playbooks live in [`server/src/agent/domain-skills.json`](server/src/agent/domain-skills.json) as a single shared JSON array. To add a site, open a PR appending a `{ domain, skill }` entry.
-
-<br/>
-
-## Build with Hanzi Browse
-
-Embed browser automation in your product. Your app calls the Hanzi Browse API, a real browser executes the task, you get the result back.
-
-1. **Get an API key** — [sign in](https://api.hanzilla.co/dashboard) to your developer console, then create a key
-2. **Pair a browser** — create a pairing token, send your user a pairing link (`/pair/{token}`) — they click it and auto-pair
-3. **Run a task** — `POST /v1/tasks` with a task and browser session ID
-4. **Get the result** — poll `GET /v1/tasks/:id` until complete, or use `runTask()` which blocks
-
-```typescript
-import { HanziClient } from '@hanzi-browse/sdk';
-
-const client = new HanziClient({ apiKey: process.env.HANZI_API_KEY });
-
-const { pairingToken } = await client.createPairingToken();
-const sessions = await client.listSessions();
-
-const result = await client.runTask({
-  browserSessionId: sessions[0].id,
-  task: 'Read the patient chart on the current page',
-});
-console.log(result.answer);
-```
-
-[API reference](https://browse.hanzilla.co/docs.html#build-with-hanzi) · [Dashboard](https://api.hanzilla.co/dashboard) · [Sample integration](examples/partner-quickstart/)
 
 <br/>
 
@@ -183,50 +130,23 @@ console.log(result.answer);
 
 ## Pricing
 
-| | Managed | BYOM |
-|--|---------|------|
-| **Price** | $0.05/task (20 free/month) | Free forever |
-| **AI model** | We handle it (Gemini) | Your own key |
-| **Data** | Processed on Hanzi Browse servers | Never leaves your machine |
-| **Billing** | Only completed tasks. Errors are free. | N/A |
-
-Building a product? [Contact us](mailto:hanzili0217@gmail.com?subject=Partner%20pricing) for volume pricing.
+**Free forever.** Hanzi Browse is BYOM (bring your own model): you use your own Claude, GPT, or Gemini key, everything runs on your machine, and no task data ever leaves it.
 
 <br/>
 
 ## Development
 
-**Prerequisites:** [Node.js 18+](https://nodejs.org/), [Docker Desktop](https://docs.docker.com/get-docker/) (must be running before `make fresh`).
+**Prerequisites:** [Node.js 18+](https://nodejs.org/). No database or Docker needed — Hanzi Browse is fully local and BYOM.
 
 ### First time (local setup)
 
 ```bash
 git clone https://github.com/hanzili/hanzi-browse
 cd hanzi-browse
-make fresh
+make setup
 ```
 
-Performs full setup: installs deps, builds server/dashboard/extension, starts Postgres, runs migrations, and launches the dev server (~90s).
-
-### Run the project
-
-```bash
-make dev
-```
-
-Starts the backend services (Postgres + migrations + API server) and serves the dashboard UI.
-- API: http://localhost:3456
-- Dashboard (requires Google OAuth): http://localhost:3456/dashboard
-
-### Configuration
-
-The defaults in `.env.example` are enough to run the server.
-
-Optional services:
-- **Google OAuth** (dashboard sign-in) -- add `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` to `.env`
-- **Stripe** (credit purchases) -- add test keys to `.env`
-- **Vertex AI** (managed task execution) -- see `.env.example` for setup steps
-- **PostHog** (analytics) -- add `POSTHOG_API_KEY` to enable local CLI telemetry, dashboard analytics, managed backend analytics, and the example apps; optionally set `POSTHOG_HOST`
+Checks prerequisites, installs dependencies, and builds both the server (MCP/CLI/relay) and the extension.
 
 ### Load the extension
 
@@ -234,80 +154,27 @@ Open `chrome://extensions`, enable Developer Mode, click "Load unpacked", and se
 
 ### Verify everything works
 
-After `make dev` is running and the extension is loaded, test both user paths:
-
-**Test 1: MCP / CLI mode (user path)**
+With the extension loaded, run a task through the CLI:
 
 ```bash
-# In a separate terminal:
 node server/dist/cli.js start "Go to example.com and tell me the page title"
 ```
 
-You should see a Chrome window open, the agent navigate to example.com, and return the page title. If this works, the relay + extension + agent loop are all connected.
+You should see a Chrome window open, the agent navigate to example.com, and return the page title. If this works, the local relay + extension + agent loop are all connected. (The relay on `ws://localhost:7862` is auto-started by the MCP/CLI.)
 
-**Test 2: Managed API mode (developer path)**
+### Configuration
 
-```bash
-# 1. Check the API is running
-curl http://localhost:3456/v1/health
-
-# 2. Open the dashboard and sign in (requires Google OAuth configured)
-open http://localhost:3456/dashboard
-
-# 3. Create an API key from the dashboard, then:
-curl -X POST http://localhost:3456/v1/browser-sessions/pair \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json"
-
-# 4. Open the pairing URL in Chrome (from the response)
-open "http://localhost:3456/pair/PAIRING_TOKEN"
-
-# 5. After pairing, run a task
-curl -X POST http://localhost:3456/v1/tasks \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"task": "Go to example.com and read the title", "browser_session_id": "SESSION_ID"}'
-
-# 6. Check the result
-curl http://localhost:3456/v1/tasks/TASK_ID \
-  -H "Authorization: Bearer YOUR_API_KEY"
-```
-
-**Test 3: Embed widget**
-
-Create a test HTML file and open it in Chrome:
-
-```html
-<div id="hanzi"></div>
-<script src="http://localhost:3456/embed.js"></script>
-<script>
-  HanziConnect.mount('#hanzi', {
-    apiKey: 'YOUR_PUBLISHABLE_KEY',
-    apiUrl: 'http://localhost:3456',
-    onConnected: (id) => console.log('Connected:', id),
-    onError: (err) => console.log('Error:', err),
-  });
-</script>
-```
-
-You should see the pairing widget with step-by-step instructions.
-
-### Notes
-
-- **Local vs CLI usage** -- `npx hanzi-browse setup` is for packaged usage and may not work in a local clone
-- **Port conflicts** -- if you see `EADDRINUSE` on `3456`, stop existing processes or run `make stop`
-- **No Google OAuth?** -- The dashboard sign-in won't work, but you can seed a test workspace directly in the database and use the API key for testing
+No configuration is required. Hanzi Browse reads model credentials from your environment, your Claude Code / Codex login, the macOS Keychain, or the extension's settings. Optional telemetry (`SENTRY_DSN`, `POSTHOG_API_KEY`) can be set via `.env` — see `.env.example`.
 
 ### Commands
 
 | Command | What it does |
 |---------|-------------|
-| `make fresh` | Full first-time setup (deps + build + DB + start) |
-| `make dev` | Start everything (DB + migrate + server) |
-| `make build` | Rebuild server + dashboard + extension |
-| `make stop` | Stop Postgres |
-| `make clean` | Stop + delete database volume |
-| `make check-prereqs` | Verify Node 18+ and Docker are available |
+| `make setup` | First-time setup (check prereqs + install deps + build) |
+| `make build` | Rebuild server (tsc) + extension (vite) |
+| `make dev` | Rebuild the server on change (tsc --watch) |
+| `make test` | Run server tests |
+| `make clean` | Remove build artifacts |
 | `make help` | Show all commands |
 
 <br/>
@@ -316,22 +183,22 @@ You should see the pairing widget with step-by-step instructions.
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions.
 
-Good first contributions: new skills, landing pages, site-pattern files, platform testing, translations. Check the [open issues](https://github.com/hanzili/hanzi-browse/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+Good first contributions: new skills, site playbooks (`domain-skills.json` entries), platform testing, translations. Check the [open issues](https://github.com/hanzili/hanzi-browse/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
 
 <br/>
 
 ## Community
 
-[Discord](https://discord.gg/hahgu5hcA5) · [Documentation](https://browse.hanzilla.co/docs.html) · [Twitter](https://x.com/user)
+[Discord](https://discord.gg/hahgu5hcA5) · [Twitter](https://x.com/user)
 
 <br/>
 
 ## Privacy
 
-Hanzi Browse operates in different modes with different data handling. [Read the privacy policy](PRIVACY.md).
+Hanzi Browse is BYOM and fully local. [Read the privacy policy](PRIVACY.md).
 
-- **BYOM**: No data sent to Hanzi Browse servers. Screenshots go to your chosen AI provider only.
-- **Managed / API**: Task data processed on Hanzi Browse servers via Google Vertex AI.
+- No task data is sent to Hanzi Browse servers — there is no hosted backend.
+- Page content and screenshots go only to the AI provider whose key you supply.
 
 <br/>
 
