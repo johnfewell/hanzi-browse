@@ -27,7 +27,7 @@ const MAX_QUEUE_SIZE = 50;
 const QUEUE_MAX_AGE_MS = 60000; // Drop queued messages older than 60s
 const queueTimestamps = [];
 function log(msg) {
-    console.error(`[Relay] ${msg}`);
+    console.error(`[Relay ${new Date().toISOString()}] ${msg}`);
 }
 function getClientsByRole(role) {
     return Array.from(clients.values()).filter(c => c.role === role);
@@ -127,13 +127,19 @@ wss.on('connection', (ws) => {
                 ws.send(JSON.stringify({ type: 'error', error: `Invalid role: ${role}` }));
                 return;
             }
-            // If a new extension registers, disconnect old one
+            // A new extension registration takes over routing, but we do NOT
+            // proactively close the old socket. The MV3 service worker reconnects
+            // whenever its socket closes, so closing here starts a self-sustaining
+            // ~5s churn loop (replace → onclose → reconnect → replace …) that drops
+            // in-flight LLM calls mid-stream and hangs the agent (hanzi-browse-bns).
+            // A dead worker's socket closes on its own (TCP → our close handler
+            // cleans it up); a live duplicate is harmless (the worker ignores any
+            // non-current socket via its own stale-socket guard).
             if (role === 'extension') {
                 const existing = getExtension();
                 if (existing && existing.ws !== ws) {
-                    log('New extension connecting, closing old one');
-                    existing.ws.close(1000, 'replaced');
                     clients.delete(existing.ws);
+                    log('New extension registered; old socket left to close naturally (no churn)');
                 }
             }
             clients.set(ws, {

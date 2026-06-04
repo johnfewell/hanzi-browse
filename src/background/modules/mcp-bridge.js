@@ -153,14 +153,24 @@ function _doConnect() {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       // Only handle if this is still the current socket
       if (getRelaySocket() !== ws) return;
-      console.log('[MCP Bridge] WebSocket disconnected');
+      console.log('[MCP Bridge] WebSocket disconnected', event?.reason || '');
 
       // Fail any in-flight relay operations so callers don't hang forever
       failAllPending();
       setRelaySocket(null);
+
+      // If the relay closed us because a NEWER connection registered
+      // (reason 'replaced'), do NOT immediately reconnect. Reconnecting here
+      // creates a self-sustaining ~5s churn loop (replace → reconnect →
+      // replace …) that drops in-flight LLM calls. A newer socket already
+      // exists; the 30s keepalive alarm is the safety net if we truly need one.
+      if (event && event.reason === 'replaced') {
+        console.log('[MCP Bridge] Replaced by a newer connection — not reconnecting (breaks churn loop)');
+        return;
+      }
 
       // Schedule reconnect
       wsReconnectTimer = setTimeout(() => {
