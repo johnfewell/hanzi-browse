@@ -66,7 +66,7 @@ function useConfig() {
 	}, []);
 	const buildAvailableModels = q(async (keys, custom, oauth, codex) => {
 		const models = [];
-		const hasOAuth = oauth?.isOAuthEnabled && oauth?.isAuthenticated;
+		const hasOAuth = oauth?.isAuthenticated;
 		if (codex?.isAuthenticated) for (const model of CODEX_MODELS) models.push({
 			name: `${model.name} (Codex Plan)`,
 			provider: "codex",
