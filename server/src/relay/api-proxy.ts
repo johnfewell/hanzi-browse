@@ -16,7 +16,7 @@ const EXPIRY_BUFFER_MS = 60 * 1000;
 const FAST_MODEL = 'claude-haiku-4-5-20251001';
 
 function defaultLogger(message: string): void {
-  console.error(`[Relay] ${message}`);
+  console.error(`[Relay ${new Date().toISOString()}] ${message}`);
 }
 
 function isCodexUrl(hostname: string): boolean {
@@ -58,15 +58,24 @@ async function sendProxyStream(
   requestId: string,
   response: Response,
   options: { endOnCompleted?: boolean } = {},
+  log: (message: string) => void = defaultLogger,
 ): Promise<void> {
   const { endOnCompleted = false } = options;
   const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const start = Date.now();
+  let sent = 0;
+  let closedLogged = false;
 
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
+
+    if (ws.readyState !== WebSocket.OPEN && !closedLogged) {
+      closedLogged = true;
+      log(`stream WS-CLOSED mid-stream rid=${requestId} afterSent=${sent} at=${((Date.now() - start) / 1000).toFixed(1)}s — dropping rest`);
+    }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -85,6 +94,7 @@ async function sendProxyStream(
             requestId,
             data: event,
           }));
+          sent++;
         }
 
         if (endOnCompleted && event.type === 'response.completed') {
@@ -96,6 +106,7 @@ async function sendProxyStream(
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'proxy_stream_end', requestId }));
           }
+          log(`stream END(completed) rid=${requestId} sent=${sent} took=${((Date.now() - start) / 1000).toFixed(1)}s open=${ws.readyState === WebSocket.OPEN}`);
           return;
         }
       } catch {
@@ -104,6 +115,7 @@ async function sendProxyStream(
     }
   }
 
+  log(`stream END rid=${requestId} sent=${sent} took=${((Date.now() - start) / 1000).toFixed(1)}s open=${ws.readyState === WebSocket.OPEN}`);
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: 'proxy_stream_end', requestId }));
   }
@@ -115,6 +127,9 @@ export async function handleApiProxy(
   log: (message: string) => void = defaultLogger,
 ): Promise<void> {
   const { requestId, url, body } = msg;
+  let reqModel = '?';
+  try { reqModel = JSON.parse(body)?.model || '?'; } catch { /* ignore */ }
+  log(`proxy START rid=${requestId} model=${reqModel} bodyLen=${(body || '').length} wsOpen=${ws.readyState === WebSocket.OPEN}`);
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
 
@@ -173,6 +188,8 @@ export async function handleApiProxy(
         } catch { /* body not JSON — leave response as-is */ }
       }
 
+      log(`proxy FETCH rid=${requestId} status=${response.status} wsOpen=${ws.readyState === WebSocket.OPEN}`);
+
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
         ws.send(JSON.stringify({
@@ -183,7 +200,7 @@ export async function handleApiProxy(
         return;
       }
 
-      await sendProxyStream(ws, requestId, response);
+      await sendProxyStream(ws, requestId, response, {}, log);
       return;
     }
 
@@ -198,7 +215,7 @@ export async function handleApiProxy(
       return;
     }
 
-    await sendProxyStream(ws, requestId, response, { endOnCompleted: true });
+    await sendProxyStream(ws, requestId, response, { endOnCompleted: true }, log);
   } catch (err: any) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({
