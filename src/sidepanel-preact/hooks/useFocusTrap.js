@@ -33,27 +33,42 @@ export function useFocusTrap(active = true) {
 
       const first = elements[0];
       const last = elements[elements.length - 1];
+      // If focus has escaped the trap (e.g. the focused element was removed or
+      // disabled), pull it back inside instead of letting Tab leave the modal.
+      const inTrap = container.contains(document.activeElement);
 
       if (e.shiftKey) {
-        if (document.activeElement === first) {
+        if (document.activeElement === first || !inTrap) {
           e.preventDefault();
           last.focus();
         }
       } else {
-        if (document.activeElement === last) {
+        if (document.activeElement === last || !inTrap) {
           e.preventDefault();
           first.focus();
         }
       }
     };
 
-    container.addEventListener('keydown', handleKeyDown);
+    // Attach at the document level in the capture phase so the trap catches
+    // Tab even when focus has escaped the container (the keydown would
+    // otherwise bubble up an ancestor chain that doesn't include `container`).
+    document.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
-      container.removeEventListener('keydown', handleKeyDown);
-      // Restore focus
-      if (previouslyFocused && previouslyFocused.focus) {
-        previouslyFocused.focus();
+      document.removeEventListener('keydown', handleKeyDown, true);
+      // Restore focus only if the previously-focused element still exists in the
+      // document and is focusable; guard against it having been unmounted.
+      if (
+        previouslyFocused &&
+        typeof previouslyFocused.focus === 'function' &&
+        document.contains(previouslyFocused)
+      ) {
+        try {
+          previouslyFocused.focus();
+        } catch {
+          /* element no longer focusable — ignore */
+        }
       }
     };
   }, [active]);

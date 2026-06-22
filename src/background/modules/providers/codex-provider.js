@@ -340,7 +340,7 @@ export class CodexProvider extends BaseProvider {
 
         content.push({
           type: 'tool_use',
-          id: item.call_id,
+          id: item.call_id || item.id,
           name: item.name,
           input: parsedArgs,
         });

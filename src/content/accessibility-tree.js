@@ -50,6 +50,24 @@ function getRole(element) {
 }
 
 /**
+ * Find the text of a <label for="id"> associated with an element.
+ * Escapes the id because ids may contain characters that are invalid in a CSS
+ * selector (e.g. quotes), which would otherwise throw and abort name resolution.
+ */
+function getAssociatedLabelText(element) {
+  if (!element.id) return "";
+  try {
+    var safeId = window.CSS && CSS.escape ? CSS.escape(element.id) : element.id;
+    var label = document.querySelector('label[for="' + safeId + '"]');
+    if (label && label.textContent && label.textContent.trim())
+      return label.textContent.trim();
+  } catch (e) {
+    /* invalid selector for this id — skip label lookup */
+  }
+  return "";
+}
+
+/**
  * Get element's accessible name (label)
  */
 // eslint-disable-next-line sonarjs/cognitive-complexity
@@ -80,11 +98,8 @@ function getName(element) {
   if (alt && alt.trim()) return alt.trim();
 
   // Try associated label
-  if (element.id) {
-    var label = document.querySelector('label[for="' + element.id + '"]');
-    if (label && label.textContent && label.textContent.trim())
-      return label.textContent.trim();
-  }
+  var labelText = getAssociatedLabelText(element);
+  if (labelText) return labelText;
 
   // For inputs, get value
   if ("input" === tag) {

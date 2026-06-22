@@ -431,13 +431,19 @@ async function emergencyCompact(messages, log) {
   // Keep only the last few messages with images
   const recentContext = preserveRecentContext(messages);
 
+  // The Anthropic API requires the first message to have role "user". Start with
+  // a synthetic user note, and only follow it with an assistant turn when the
+  // recent context itself begins with a user message (to preserve alternation).
   const compacted = [
     {
-      role: 'assistant',
-      content: 'Previous conversation was truncated due to length. I\'ll continue from the recent context.',
+      role: 'user',
+      content: 'The previous conversation was truncated due to length. Continue from the recent context below.',
     },
-    ...recentContext,
   ];
+  if (recentContext.length > 0 && recentContext[0].role === 'user') {
+    compacted.push({ role: 'assistant', content: 'Understood. Continuing from the recent context.' });
+  }
+  compacted.push(...recentContext);
 
   await log('COMPACT', `Emergency compact: ${messages.length} msgs → ${compacted.length} msgs`);
   return compacted;

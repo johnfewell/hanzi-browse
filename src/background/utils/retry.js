@@ -44,8 +44,8 @@ export async function retryWithBackoff(fn, options = {}) {
         onRetry(attempt, error);
       }
 
-      // Exponential backoff: delay * attempt
-      await new Promise(r => setTimeout(r, delay * attempt));
+      // Exponential backoff: delay * 2^(attempt-1) → delay, 2*delay, 4*delay, ...
+      await new Promise(r => setTimeout(r, delay * Math.pow(2, attempt - 1)));
     }
   }
 
