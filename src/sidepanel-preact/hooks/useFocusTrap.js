@@ -50,10 +50,13 @@ export function useFocusTrap(active = true) {
       }
     };
 
-    container.addEventListener('keydown', handleKeyDown);
+    // Attach at the document level in the capture phase so the trap catches
+    // Tab even when focus has escaped the container (the keydown would
+    // otherwise bubble up an ancestor chain that doesn't include `container`).
+    document.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
-      container.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown, true);
       // Restore focus only if the previously-focused element still exists in the
       // document and is focusable; guard against it having been unmounted.
       if (

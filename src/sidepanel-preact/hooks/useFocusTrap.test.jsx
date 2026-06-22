@@ -58,7 +58,10 @@ describe('useFocusTrap', () => {
     outside.focus();
     expect(container.firstChild.contains(document.activeElement)).toBe(false);
 
-    const ev = dispatchTab(container.firstChild);
+    // Dispatch on the outside element itself — the keydown bubbles up its own
+    // ancestor chain (not through the modal container), so only a document-
+    // level capture listener will catch it.
+    const ev = dispatchTab(outside);
     expect(ev.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(getByText('first'));
 
