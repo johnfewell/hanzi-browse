@@ -131,6 +131,7 @@ export function pruneOldSessions() {
 export function deleteSessionFiles(sessionId) {
     const statusPath = getSessionFilePath(sessionId);
     const logPath = getSessionLogPath(sessionId);
+    const screenshotPath = getSessionScreenshotPath(sessionId);
     let deleted = false;
     if (existsSync(statusPath)) {
         unlinkSync(statusPath);
@@ -138,6 +139,12 @@ export function deleteSessionFiles(sessionId) {
     }
     if (existsSync(logPath)) {
         unlinkSync(logPath);
+        deleted = true;
+    }
+    // Screenshots (.png) are written by the `screenshot` command; delete them too
+    // so removing/pruning a session does not leak binary files on disk.
+    if (existsSync(screenshotPath)) {
+        unlinkSync(screenshotPath);
         deleted = true;
     }
     return deleted;

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import { writeSessionStatus, readSessionStatus, deleteSessionFiles, pruneOldSessions, SESSION_TTL_MS } from './session-files.js';
+import { existsSync } from 'fs';
+import { writeSessionStatus, readSessionStatus, deleteSessionFiles, pruneOldSessions, getSessionScreenshotPath, SESSION_TTL_MS } from './session-files.js';
 
 describe('session-files atomic writes', () => {
   const sid = 'test-atomic';
@@ -18,6 +19,17 @@ describe('session-files atomic writes', () => {
     expect(final).not.toBeNull();
     expect(final!.status).toBe('running');
     expect(final!.task).toMatch(/^task \d+$/);
+  });
+
+  it('deletes the .png screenshot file too (no binary file leak on remove)', () => {
+    writeSessionStatus(sid, { status: 'complete', task: 'shot' });
+    const pngPath = getSessionScreenshotPath(sid);
+    writeFileSync(pngPath, Buffer.from([0x89, 0x50, 0x4e, 0x47])); // PNG magic bytes
+    expect(existsSync(pngPath)).toBe(true);
+
+    const deleted = deleteSessionFiles(sid);
+    expect(deleted).toBe(true);
+    expect(existsSync(pngPath)).toBe(false);
   });
 });
 

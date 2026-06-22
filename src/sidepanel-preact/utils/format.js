@@ -58,28 +58,42 @@ export function escapeHtml(text) {
   return div.innerHTML;
 }
 
+// Static label map for simple computer actions (no dynamic input needed).
+const COMPUTER_ACTION_LABELS = {
+  screenshot: 'Taking screenshot',
+  right_click: 'Right-clicking',
+  double_click: 'Double-clicking',
+  triple_click: 'Triple-clicking',
+  scroll_to: 'Scrolling to element',
+  hover: 'Hovering',
+  left_click_drag: 'Dragging',
+  wait: 'Waiting',
+  zoom: 'Zooming in',
+};
+
+function describeComputerAction(input) {
+  const action = input.action;
+  if (action === 'left_click') {
+    if (input.ref) return `Clicking ${input.ref}`;
+    if (input.coordinate) return `Clicking at (${input.coordinate[0]}, ${input.coordinate[1]})`;
+    return 'Clicking';
+  }
+  if (action === 'type') {
+    const text = input.text || '';
+    return `Typing "${text.substring(0, 30)}${text.length > 30 ? '...' : ''}"`;
+  }
+  if (action === 'key') return `Pressing ${input.text}`;
+  if (action === 'scroll') return `Scrolling ${input.scroll_direction || 'down'}`;
+  return COMPUTER_ACTION_LABELS[action] || `Computer: ${action}`;
+}
+
 // Get action description for tool execution
 export function getActionDescription(toolName, input) {
   if (!input) return toolName;
 
   switch (toolName) {
-    case 'computer': {
-      const action = input.action;
-      if (action === 'screenshot') return 'Taking screenshot';
-      if (action === 'left_click') {
-        if (input.ref) return `Clicking ${input.ref}`;
-        if (input.coordinate) return `Clicking at (${input.coordinate[0]}, ${input.coordinate[1]})`;
-        return 'Clicking';
-      }
-      if (action === 'right_click') return 'Right-clicking';
-      if (action === 'double_click') return 'Double-clicking';
-      if (action === 'type') return `Typing "${(input.text || '').substring(0, 30)}${input.text?.length > 30 ? '...' : ''}"`;
-      if (action === 'key') return `Pressing ${input.text}`;
-      if (action === 'scroll') return `Scrolling ${input.scroll_direction}`;
-      if (action === 'mouse_move') return 'Moving mouse';
-      if (action === 'drag') return 'Dragging';
-      return `Computer: ${action}`;
-    }
+    case 'computer':
+      return describeComputerAction(input);
     case 'navigate':
       if (input.action === 'back') return 'Going back';
       if (input.action === 'forward') return 'Going forward';
